@@ -3,11 +3,13 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <stdint.h>
 
 FILE *logsFile;
 
 void setupLogs() {
 	logsFile = fopen("logs.txt", "w");
+	//logsFile = fopen("/dev/null", "w");
 }
 
 void closeLogs() {
@@ -384,30 +386,33 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int trainBl
 	}
 	cost /= trainBlockSize;
 
-	fprintf(logsOutput, "\ninputs:");
-	for(int block = 0; block < trainBlockSize; block++) {
-		fprintf(logsOutput, "\n    inputs%d:", block);
-		for(int i = 0; i < nn.inputLayerNeuronsCount; i++) {
-			fprintf(logsOutput, " %f", nn.net[i].results[block]);
+	if(logsOutput != NULL) {
+		/*fprintf(logsOutput, "\ninputs:");
+		for(int block = 0; block < trainBlockSize; block++) {
+			fprintf(logsOutput, "\n    inputs%d:", block);
+			for(int i = 0; i < nn.inputLayerNeuronsCount; i++) {
+				fprintf(logsOutput, " %f", nn.net[i].results[block]);
+			}
+		}*/
+	
+		fprintf(logsOutput, "\nresults:");
+		for(int block = 0; block < trainBlockSize; block++) {
+			fprintf(logsOutput, "\n    results%d:", block);
+			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+				fprintf(logsOutput, " %f", nn.net[lastLayerFirstIndex + i].results[block]);
+			}
 		}
-	}
-	fprintf(logsOutput, "\nresults:");
-	for(int block = 0; block < trainBlockSize; block++) {
-		fprintf(logsOutput, "\n    results%d:", block);
-		for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
-			fprintf(logsOutput, " %f", nn.net[lastLayerFirstIndex + i].results[block]);
+	
+		fprintf(logsOutput, "\nwe need:");//text like this to make desired results right under real ones
+		for(int block = 0; block < trainBlockSize; block++) {
+			fprintf(logsOutput, "\n    we need%d:", block);
+			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+				fprintf(logsOutput, " %f", desiredOutputs[nn.outputLayerNeuronsCount * block + i]);
+			}
 		}
+		fprintf(logsOutput, "\ncost function %f\n", cost);
 	}
 
-	fprintf(logsOutput, "\nwe need:");//text like this to make desired results right under real ones
-	for(int block = 0; block < trainBlockSize; block++) {
-		fprintf(logsOutput, "\n    we need%d:", block);
-		for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
-			fprintf(logsOutput, " %f", desiredOutputs[nn.outputLayerNeuronsCount * block + i]);
-		}
-	}
-	
-	fprintf(logsOutput, "\ncost function %f\n", cost);
 	return cost;
 }
 
@@ -452,7 +457,7 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	if(trainBlockSize < 1) {
 		fprintf(stderr, "\ntrain size < 1\n");
 	}
-	double trainKoeff = nn.net[0].aft == sigmoid ? 0.8 : 0.09;
+	double trainKoeff = nn.net[0].aft == sigmoid ? 2.8 : 0.09;
 
 	for(int i = nn.inputLayerNeuronsCount; i < nn.inputLayerNeuronsCount + nn.outputLayerNeuronsCount + nn.hiddenLayersCount * nn.neuronsPerHiddenLayer; i++) {
 		struct Neuron *n = &(nn.net[i]);
@@ -483,10 +488,7 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, double cost
 	for(int i = 0; i < maxCycles; i++) {
 		calculate(nn, inputs, 0);
 
-		printNetworkInFile(nn);
-		double cost = costFunction(nn, outputs, 1, logsFile);
-		if(cost < costFunctionToStop) return;
-
+		//printNetworkInFile(nn);
 		calculateDeltas(nn, outputs, 0);
 
 		updateWeights(nn, 1);
@@ -497,28 +499,48 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, double cost
 void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
+	printf("\nindexes for shuffle created\n");
 	for(int i = 0; i < examplesQuantity; i++) {
 		indexes[i] = i;
 	}
+	printf("\nindexes set\n");
+	double *input = malloc(inputSize * sizeof(double));
+	double *output = malloc(outputSize * sizeof(double));
+			
 	for(int c = 0; c < maxCycles; c++) {
+		printf("\ngroup train cycle %d", c);
 		fprintf(logsFile, "\ngroup train cycle %d", c);
 
+		double cycleCost = 0;
 		shuffle(indexes, examplesQuantity);
 		for(int i = 0; i < examplesQuantity; i++) {
-			double *input = malloc(inputSize * sizeof(double));
-			double *output = malloc(outputSize * sizeof(double));
+			//printf("\ngroup train cycle %d example %d", c, i);
+
 			for(int k = 0; k < inputSize; k++) {
 				input[k] = inputs[inputSize * indexes[i] + k];
 			}
 			for(int k = 0; k < outputSize; k++) {
 				output[k] = outputs[outputSize * indexes[i] + k];
 			}
-
+/*
+			for(int k = 0; k < 784; k++) {
+				printf(" %03.0f", input[k]);
+				if(k % 28 == 27) printf("\n");
+			}
+*/
 			train(nn, input, output, costFunctionToStop, 1);
-			free(input);
-			free(output);
+
+			double cost = costFunction(nn, output, 1, i % 10000 == 0 ? logsFile : NULL);
+			cycleCost += cost;
 		}
+		//printNetworkInFile(nn);
+		cycleCost /= examplesQuantity;
+		printf("\ncycleCost %f\n", cycleCost);
+		//if(cost < costFunctionToStop) break;
 	}
+	free(input);
+	free(output);
+		
 	free(indexes);
 }
 
@@ -615,7 +637,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 }
 
 void testXOR(struct NeuralNetwork nn) {
-	int maxTrainCycles = 10000;
+	int maxTrainCycles = 3000;
 	double costFuncToStop = 0.015;
 
 	double inputs[] = {1, 1};
@@ -642,9 +664,9 @@ void testXOR(struct NeuralNetwork nn) {
 				1,
 				0
 	};
-	//trainByGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	trainByGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
 	//trainByBatchGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	trainByMiniBatchStochasticGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2);
+	//trainByMiniBatchStochasticGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2);
 
 	printf("\ntest xor:\n");
 
@@ -767,6 +789,152 @@ void testAND(struct NeuralNetwork nn) {
 	costFunction(nn, outputs3, 1, stdout);
 }
 
+struct MNIST_Data {
+	int dimensionsAmount;
+	int *dimensions;
+	int count;
+	unsigned char *data;
+};
+
+void freeMNIST(struct MNIST_Data mnist) {
+	free(mnist.dimensions);
+	free(mnist.data);
+}
+
+struct MNIST_Data readMNIST(char *fileName) {
+	FILE *file = fopen(fileName, "rb");
+	unsigned char mainInfoBuffer[4];
+	int *dimensions = NULL;
+	int samplesCount;
+	unsigned char *data;
+	fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, file);
+
+	struct MNIST_Data mnist;
+
+	int dimensionsAmount = mainInfoBuffer[3];
+	if(dimensionsAmount > 0) {
+		int dimensionsBufferSize = dimensionsAmount * sizeof(uint32_t);
+		int sampleSize = 1;
+		uint32_t *dimensionsBuffer = malloc(dimensionsBufferSize);
+		uint32_t *allDimensions = malloc(dimensionsBufferSize);
+
+		fread(dimensionsBuffer, dimensionsBufferSize, 1, file);
+		for(int i = 0; i < dimensionsAmount; i++) {
+			//printf("%d\n", __builtin_bswap32(dimensionsBuffer[i]));
+			allDimensions[i] = __builtin_bswap32(dimensionsBuffer[i]);
+		}
+		samplesCount = allDimensions[0];
+		if(dimensionsAmount > 1) {
+			dimensions = malloc((dimensionsAmount - 1) * sizeof(int));
+			for(int i = 1; i < dimensionsAmount; i++) {
+				dimensions[i - 1] = allDimensions[i];
+				sampleSize *= dimensions[i - 1];
+			}
+		} else {
+			dimensions = malloc(sizeof(int));
+			dimensions[0] = 1;
+		}
+		free(allDimensions);
+		free(dimensionsBuffer);
+
+		int dataSize = sampleSize * samplesCount * sizeof(char);
+		unsigned char *buf = malloc(dataSize);
+		fread(buf, dataSize, 1, file);
+
+		mnist.dimensionsAmount = dimensionsAmount < 2 ? 1 : dimensionsAmount - 1;
+		mnist.dimensions = dimensions;
+		mnist.count = samplesCount;
+		mnist.data = buf;
+/*
+		for(int sample = samplesCount - 10; sample < samplesCount; sample++) {
+			printf("\nsample %d\n", sample);
+			for(int i = 0; i < 784; i++) {
+				printf(" %03d", buf[sample * 784 + i]);
+				if(i % 28 == 27) printf("\n");
+			}
+		}
+*/
+	} else {
+		fclose(file);
+		fprintf(stderr, "wrong mnist file format");
+		exit(1);
+	}
+	fclose(file);
+
+	return mnist;
+}
+
+void testMNIST() {
+	/*FILE *trainDataFile = fopen("train-images.idx3-ubyte", "rb");
+	unsigned char mainInfoBuffer[4];
+	fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, trainDataFile);
+	printf("\n%d %d %d %d\n", mainInfoBuffer[0], mainInfoBuffer[1], mainInfoBuffer[2], mainInfoBuffer[3]);
+*/
+	/*for(int i = 0; i < 5; i++) {
+		fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, trainDataFile);
+		printf("\n%d %d %d %d\n", mainInfoBuffer[0], mainInfoBuffer[1], mainInfoBuffer[2], mainInfoBuffer[3]);
+	}*/
+/*
+	if(mainInfoBuffer[3] > 0) {
+		int dimensionsBufferSize = mainInfoBuffer[3] * sizeof(uint32_t);
+		uint32_t *dimensionsBuffer = malloc(dimensionsBufferSize);
+		fread(dimensionsBuffer, dimensionsBufferSize, 1, trainDataFile);
+		for(int i = 0; i < mainInfoBuffer[3]; i++) {
+			printf("%d\n", __builtin_bswap32(dimensionsBuffer[i]));
+		}
+		unsigned char buf;
+		for(int i = 0; i < 784; i++) {
+			fread(&buf, 1, 1, trainDataFile);
+			printf(" %03d", buf);
+			if(i % 28 == 27) printf("\n");
+		}
+		free(dimensionsBuffer);
+	}
+	//struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, 4, sigmoid);
+	fclose(trainDataFile);*/
+	struct MNIST_Data mnistTrainImages = readMNIST("train-images.idx3-ubyte");
+	struct MNIST_Data mnistTrainLabels = readMNIST("train-labels.idx1-ubyte");
+/*
+	for(int sample = 0; sample < 10; sample++) {
+		printf("\nsample %d contain %d\n", sample, mnistTrainLabels.data[sample]);
+		for(int i = 0; i < 784; i++) {
+			printf(" %03d", mnistTrainImages.data[sample * 784 + i]);
+			if(i % 28 == 27) printf("\n");
+		}
+	}
+*/
+	int trainBlockSize = 100;
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid);
+
+	printf("\nnetwork created\n");
+
+	double *inputs = malloc(mnistTrainImages.count * 784 * sizeof(double));
+	double *outputs = calloc(mnistTrainLabels.count * 10, sizeof(double));
+	for(int i = 0; i < mnistTrainLabels.count; i++) {
+		outputs[i * 10 + mnistTrainLabels.data[i]] = 1;
+		for(int k = 0; k < 784; k++) {
+			inputs[i * 784 + k] = ((double)mnistTrainImages.data[i * 784 + k]) / 255.0;
+		}
+	}
+	
+	printf("\ninputs set\n");
+/*
+			for(int i = 0; i < 784; i++) {
+				printf(" %03.0f", inputs[i]);
+				if(i % 28 == 27) printf("\n");
+			}
+*/	
+	double costFuncToStop = 0.15;
+	int maxTrainCycles = 1;
+	trainByGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles);
+
+	free(inputs);
+	free(outputs);
+	destroyNetwork(&nn);
+	freeMNIST(mnistTrainImages);
+	freeMNIST(mnistTrainLabels);
+}
+
 int main() {
 	/*struct Neuron *neuron = createNeuron(0, 0, 1);
 	neuron->weights[0] = 1;
@@ -867,7 +1035,7 @@ int main() {
 	costFunction(*nn, outputs3);
 */
 
-	testXOR(*nn);
+	//testXOR(*nn);
 	//testOR(*nn);
 	//testAND(*nn);
 
@@ -875,6 +1043,8 @@ int main() {
 
 	destroyNetwork(&nn);
 	printf("nn destroyed %p\n", nn);
+
+	testMNIST();
 
 	closeLogs();
 
