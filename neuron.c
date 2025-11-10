@@ -623,10 +623,11 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 			cycleCost += batchCost;
 			free(batchOutputs);
 		}
-		printNetworkInFile(nn);
+		//printNetworkInFile(nn);
 
 		cycleCost /= totalInternalCycles;
-		fprintf(logsFile, "\ncycle cost function: %f\n", cycleCost);
+		fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
+		printf("\ncycle %d cost function: %f\n", c, cycleCost);
 		if(cycleCost < costFunctionToStop) {
 			free(indexes);
 			return;
@@ -903,7 +904,7 @@ void testMNIST() {
 		}
 	}
 */
-	int trainBlockSize = 100;
+	int trainBlockSize = 10;
 	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid);
 
 	printf("\nnetwork created\n");
@@ -924,9 +925,10 @@ void testMNIST() {
 				if(i % 28 == 27) printf("\n");
 			}
 */	
-	double costFuncToStop = 0.15;
-	int maxTrainCycles = 1;
-	trainByGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles);
+	double costFuncToStop = 0.07;
+	int maxTrainCycles = 10;
+	//trainByGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles);
+	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles, trainBlockSize);
 
 	free(inputs);
 	free(outputs);
