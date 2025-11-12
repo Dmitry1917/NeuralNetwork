@@ -8,12 +8,12 @@
 FILE *logsFile;
 
 void setupLogs() {
-	logsFile = fopen("logs.txt", "w");
+	logsFile = NULL;//fopen("logs.txt", "w");
 	//logsFile = fopen("/dev/null", "w");
 }
 
 void closeLogs() {
-	fclose(logsFile);
+	if(logsFile != NULL) fclose(logsFile);
 }
 
 double randomf(double from, double to) {
@@ -52,40 +52,35 @@ struct Neuron {
 	double *deltas;
 };
 
-struct Neuron* createNeuron(int layer, int index, int weightsCount) {
-	struct Neuron *neuron = malloc(sizeof(struct Neuron));
-	neuron->layer = layer;
-	neuron->index = index;
-	neuron->weightsCount = weightsCount;
-	neuron->weights = calloc(weightsCount, sizeof(double));
-	neuron->bias = 0;
-	return neuron;
-}
-
-void destroyNeuron(struct Neuron *neuron) {
-	free(neuron->weights);
-	free(neuron);
-}
-
 double propagation(struct Neuron neuron, double* inputs, int inputsCount) {
-	if(neuron.weightsCount != inputsCount) {
+	/*if(neuron.weightsCount != inputsCount) {
 		fprintf(stderr, "Inputs and weights different quantities");
 		exit(1);
-	}
+	}*/
 	double res = 0;
+	int i = 0;
 
-	for(int i = 0; i < inputsCount; i++) {
+	// Surprisingly good optimization - MNIST 10 cycles train and check time drop from 1:45 to 1:15 from this alone. Increasing hardcode more dont provide benefits.
+	for(; i < inputsCount - 5; i += 5) {
+		res += neuron.weights[i] * inputs[i] +
+			neuron.weights[i+1] * inputs[i+1] +
+			neuron.weights[i+2] * inputs[i+2] +
+			neuron.weights[i+3] * inputs[i+3] +
+			neuron.weights[i+4] * inputs[i+4];
+	}
+	for(; i < inputsCount; i++) {
 		res += neuron.weights[i] * inputs[i];
 	}
+
 	res += neuron.bias;
 	return res;
 }
 
 double activation(struct Neuron neuron, double* inputs, int inputsCount) {
-	if(neuron.weightsCount != inputsCount) {
+	/*if(neuron.weightsCount != inputsCount) {
 		fprintf(stderr, "Inputs and weights different quantities");
 		exit(1);
-	}
+	}*/
 
 	double arg = propagation(neuron, inputs, inputsCount);
 	double res;
@@ -102,10 +97,10 @@ double activation(struct Neuron neuron, double* inputs, int inputsCount) {
 }
 
 double derivativeOfLastActivation(struct Neuron neuron, int resIndex) {
-	if(resIndex < 0) {
+	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresult index < 0\n");
 		exit(1);
-	}
+	}*/
 	double lastRes = neuron.results[resIndex];
 	switch(neuron.aft) {
 		case sigmoid:
@@ -115,6 +110,7 @@ double derivativeOfLastActivation(struct Neuron neuron, int resIndex) {
 	}
 }
 
+//TODO Will change after other activation functions are introduced.
 double derivativeOfActivation(struct Neuron neuron, double *inputs, int resIndex) {
 	// for sigmoid it is simple, but for other function must change
 	return derivativeOfLastActivation(neuron, resIndex);
@@ -174,7 +170,6 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		nn->net[il].resCount = trainBlockSize;
 		nn->net[il].results = calloc(trainBlockSize, sizeof(double));
 		nn->net[il].deltas = calloc(trainBlockSize, sizeof(double));
-
 	}
 
 	// hidden layers
@@ -200,7 +195,6 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			nn->net[il].resCount = trainBlockSize;
 			nn->net[il].results = calloc(trainBlockSize, sizeof(double));
 			nn->net[il].deltas = calloc(trainBlockSize, sizeof(double));
-
 		}
 	}
 
@@ -228,6 +222,10 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 		nn.net[i].results[resIndex] = inputs[i];
 	}
 
+	int maxPrevLayerCount = nn.inputLayerNeuronsCount;
+	if(maxPrevLayerCount < nn.neuronsPerHiddenLayer) maxPrevLayerCount = nn.neuronsPerHiddenLayer;
+	double *prevLayerRes = malloc(sizeof(double) * maxPrevLayerCount);
+
 	for(int i = nn.inputLayerNeuronsCount; i < nn.neuronsCount; i++) {
 		struct Neuron n = nn.net[i];
 
@@ -237,18 +235,16 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 		} else {
 			previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n.layer - 2);
 		}
-		int prevLayerCount = n.layer == 1 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
-		double *prevLayerRes = malloc(sizeof(double) * prevLayerCount);
 
 		for(int k = 0; k < n.weightsCount; k++) {
 			prevLayerRes[k] = nn.net[previousLayerFirstIndex + k].results[resIndex];
 		}
 
 		double res = activation(n, prevLayerRes, n.weightsCount);
-		free(prevLayerRes);
 
 		nn.net[i].results[resIndex] = res;
 	}
+	free(prevLayerRes);
 }
 
 // for small networks only and one result
@@ -484,7 +480,7 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	}
 }
 
-void train(struct NeuralNetwork nn, double *inputs, double *outputs, double costFunctionToStop, int maxCycles) {
+void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycles) {
 	for(int i = 0; i < maxCycles; i++) {
 		calculate(nn, inputs, 0);
 
@@ -528,7 +524,7 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 				if(k % 28 == 27) printf("\n");
 			}
 */
-			train(nn, input, output, costFunctionToStop, 1);
+			train(nn, input, output, 1);
 
 			double cost = costFunction(nn, output, 1, i % 10000 == 0 ? logsFile : NULL);
 			cycleCost += cost;
@@ -536,7 +532,7 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 		//printNetworkInFile(nn);
 		cycleCost /= examplesQuantity;
 		printf("\ncycleCost %f\n", cycleCost);
-		//if(cost < costFunctionToStop) break;
+		if(cycleCost < costFunctionToStop) break;
 	}
 	free(input);
 	free(output);
@@ -546,11 +542,11 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 
 // train by all samples at once 
 void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
+	double *input = malloc(inputSize * sizeof(double));
+	double *output = malloc(outputSize * sizeof(double));
 	for(int c = 0; c < maxCycles; c++) {
 		fprintf(logsFile, "\ngroup together train cycle %d", c);
 		for(int i = 0; i < examplesQuantity; i++) {
-			double *input = malloc(inputSize * sizeof(double));
-			double *output = malloc(outputSize * sizeof(double));
 			for(int k = 0; k < inputSize; k++) {
 				input[k] = inputs[inputSize * i + k];
 			}
@@ -560,17 +556,20 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 
 			calculate(nn, input, i);
 			calculateDeltas(nn, output, i);
-
-			free(input);
-			free(output);
 		}
 		printNetworkInFile(nn);
 
 		double cost = costFunction(nn, outputs, examplesQuantity, logsFile);
-		if(cost < costFunctionToStop) return;
+		if(cost < costFunctionToStop) {
+			free(input);
+			free(output);
+			return;
+		}
 
 		updateWeights(nn, examplesQuantity);
 	}
+	free(input);
+	free(output);
 }
 
 // train by small batch of samples at once, reshuffling after all batches was processed in current cycle
@@ -585,8 +584,12 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	int lastBatchSize = examplesQuantity % batchSize;
 	int totalInternalCycles = internalCycles + (lastBatchSize > 0 ? 1 : 0);
 
+	double *input = malloc(inputSize * sizeof(double));
+	double *output = malloc(outputSize * sizeof(double));
+	double *batchOutputs = malloc(outputSize * batchSize * sizeof(double));
+
 	for(int c = 0; c < maxCycles; c++) {
-		fprintf(logsFile, "\ngroup together train cycle %d", c);
+		//fprintf(logsFile, "\ngroup together train cycle %d", c);
 
 		shuffle(indexes, examplesQuantity);
 
@@ -598,11 +601,8 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 				samplesCount = lastBatchSize;
 			}
 
-			double *batchOutputs = malloc(outputSize * samplesCount * sizeof(double));
 			int startIndex = internalCycle * batchSize;
 			for(int i = 0; i < samplesCount; i++) {
-				double *input = malloc(inputSize * sizeof(double));
-				double *output = malloc(outputSize * sizeof(double));
 				for(int k = 0; k < inputSize; k++) {
 					input[k] = inputs[inputSize * indexes[startIndex + i] + k];
 				}
@@ -613,20 +613,16 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 
 				calculate(nn, input, i);
 				calculateDeltas(nn, output, i);
-
-				free(input);
-				free(output);
 			}
 
 			updateWeights(nn, samplesCount);
 			double batchCost = costFunction(nn, batchOutputs, samplesCount, logsFile);
 			cycleCost += batchCost;
-			free(batchOutputs);
 		}
 		//printNetworkInFile(nn);
 
 		cycleCost /= totalInternalCycles;
-		fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
+		//fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
 		printf("\ncycle %d cost function: %f\n", c, cycleCost);
 
 		if(mnistCorrectness != NULL) {
@@ -636,16 +632,26 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 
 		if(cycleCost < costFunctionToStop) {
 			free(indexes);
+			free(batchOutputs);
+			free(input);
+			free(output);
 			return;
 		}
 	}
 
+	free(batchOutputs);
+	free(input);
+	free(output);
 	free(indexes);
 }
 
-void testXOR(struct NeuralNetwork nn) {
+void testXOR() {
 	int maxTrainCycles = 3000;
 	double costFuncToStop = 0.015;
+
+	int trainBlockSize = 4;
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid);
+	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
 	double outputs[] = { 0 };
@@ -671,32 +677,38 @@ void testXOR(struct NeuralNetwork nn) {
 				1,
 				0
 	};
-	trainByGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByBatchGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByMiniBatchStochasticGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
+	trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	//trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	//trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
 
 	printf("\ntest xor:\n");
 
-	calculate(nn, inputs, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs, 1, stdout);
+	calculate(*nn, inputs, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs, 1, stdout);
 
-	calculate(nn, inputs1, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs1, 1, stdout);
+	calculate(*nn, inputs1, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs1, 1, stdout);
 
-	calculate(nn, inputs2, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs2, 1, stdout);
+	calculate(*nn, inputs2, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs2, 1, stdout);
 
-	calculate(nn, inputs3, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs3, 1, stdout);
+	calculate(*nn, inputs3, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs3, 1, stdout);
+
+	destroyNetwork(&nn);
 }
 
-void testOR(struct NeuralNetwork nn) {
+void testOR() {
 	int maxTrainCycles = 1000;
 	double costFuncToStop = 0.015;
+
+	int trainBlockSize = 4;
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid);
+	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
 	double outputs[] = { 1 };
@@ -722,32 +734,38 @@ void testOR(struct NeuralNetwork nn) {
 				1,
 				0
 	};
-	//trainByGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByBatchGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	trainByMiniBatchStochasticGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
+	//trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	//trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
 
 	printf("\ntest or:\n");
 
-	calculate(nn, inputs, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs, 1, stdout);
+	calculate(*nn, inputs, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs, 1, stdout);
 
-	calculate(nn, inputs1, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs1, 1, stdout);
+	calculate(*nn, inputs1, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs1, 1, stdout);
 
-	calculate(nn, inputs2, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs2, 1, stdout);
+	calculate(*nn, inputs2, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs2, 1, stdout);
 
-	calculate(nn, inputs3, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs3, 1, stdout);
+	calculate(*nn, inputs3, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs3, 1, stdout);
+
+	destroyNetwork(&nn);
 }
 
-void testAND(struct NeuralNetwork nn) {
+void testAND() {
 	int maxTrainCycles = 1000;
 	double costFuncToStop = 0.015;
+
+	int trainBlockSize = 4;
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid);
+	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
 	double outputs[] = { 1 };
@@ -773,27 +791,29 @@ void testAND(struct NeuralNetwork nn) {
 				0,
 				0
 	};
-	//trainByGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByBatchGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	trainByMiniBatchStochasticGradientDescent(nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
+	//trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	//trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
+	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
 
 	printf("\ntest and:\n");
 
-	calculate(nn, inputs, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs, 1, stdout);
+	calculate(*nn, inputs, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs, 1, stdout);
 
-	calculate(nn, inputs1, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs1, 1, stdout);
+	calculate(*nn, inputs1, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs1, 1, stdout);
 
-	calculate(nn, inputs2, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs2, 1, stdout);
+	calculate(*nn, inputs2, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs2, 1, stdout);
 
-	calculate(nn, inputs3, 0);
-	printNetwork(nn);
-	costFunction(nn, outputs3, 1, stdout);
+	calculate(*nn, inputs3, 0);
+	printNetwork(*nn);
+	costFunction(*nn, outputs3, 1, stdout);
+
+	destroyNetwork(&nn);
 }
 
 struct MNIST_Data {
@@ -870,7 +890,7 @@ struct MNIST_Data readMNIST(char *fileName) {
 
 		fread(dimensionsBuffer, dimensionsBufferSize, 1, file);
 		for(int i = 0; i < dimensionsAmount; i++) {
-			//printf("%d\n", __builtin_bswap32(dimensionsBuffer[i]));
+			// Process big/little endians.
 			allDimensions[i] = __builtin_bswap32(dimensionsBuffer[i]);
 		}
 		samplesCount = allDimensions[0];
@@ -915,34 +935,6 @@ struct MNIST_Data readMNIST(char *fileName) {
 }
 
 void testMNIST() {
-	/*FILE *trainDataFile = fopen("train-images.idx3-ubyte", "rb");
-	unsigned char mainInfoBuffer[4];
-	fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, trainDataFile);
-	printf("\n%d %d %d %d\n", mainInfoBuffer[0], mainInfoBuffer[1], mainInfoBuffer[2], mainInfoBuffer[3]);
-*/
-	/*for(int i = 0; i < 5; i++) {
-		fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, trainDataFile);
-		printf("\n%d %d %d %d\n", mainInfoBuffer[0], mainInfoBuffer[1], mainInfoBuffer[2], mainInfoBuffer[3]);
-	}*/
-/*
-	if(mainInfoBuffer[3] > 0) {
-		int dimensionsBufferSize = mainInfoBuffer[3] * sizeof(uint32_t);
-		uint32_t *dimensionsBuffer = malloc(dimensionsBufferSize);
-		fread(dimensionsBuffer, dimensionsBufferSize, 1, trainDataFile);
-		for(int i = 0; i < mainInfoBuffer[3]; i++) {
-			printf("%d\n", __builtin_bswap32(dimensionsBuffer[i]));
-		}
-		unsigned char buf;
-		for(int i = 0; i < 784; i++) {
-			fread(&buf, 1, 1, trainDataFile);
-			printf(" %03d", buf);
-			if(i % 28 == 27) printf("\n");
-		}
-		free(dimensionsBuffer);
-	}
-	//struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, 4, sigmoid);
-	fclose(trainDataFile);*/
-
 	// train data
 	struct MNIST_Data mnistTrainImages = readMNIST("train-images.idx3-ubyte");
 	struct MNIST_Data mnistTrainLabels = readMNIST("train-labels.idx1-ubyte");
@@ -1016,113 +1008,13 @@ void testMNIST() {
 }
 
 int main() {
-	/*struct Neuron *neuron = createNeuron(0, 0, 1);
-	neuron->weights[0] = 1;
-
-	double inputs[] = { 0 };
-	double act = activation(*neuron, inputs, 1);
-	printf("activation %f\n", act);
-	destroyNeuron(neuron);
-*/
 	srandom(time(NULL));
 
 	setupLogs();
 
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, 4, sigmoid);
-	//printNetwork(*nn);
-
-	double inputs[] = {1, 1};
-	double outputs[] = { 0 };
-/*
-	calculate(*nn, inputs);
-	printNetwork(*nn);
-	costFunction(*nn, outputs);
-*/
-/*
-	int trainCycles = 70;
-	for(int i = 0; i < trainCycles; i++) {
-		printf("\ntrain cycle %d\n", i);
-		calculateDeltas(*nn, outputs);
-		//printNetwork(nn);
-
-		updateWeights(*nn, inputs);
-		//printNetwork(nn);
-
-		calculate(*nn, inputs);
-		printNetwork(nn);
-		costFunction(*nn, outputs);
-	}
-*/
-	// xor
-	int maxTrainCycles = 1000;
-	double costFuncToStop = 0.015;
-	// input 1,1 output 0
-	//train(*nn, inputs, outputs, costFuncToStop, maxTrainCycles);
-
-	// input 1,0 output 1
-	double inputs1[] = {1, 0};
-	double outputs1[] = { 1 };
-	//train(*nn, inputs1, outputs1, costFuncToStop, maxTrainCycles);
-
-	// input 0,1 output 1
-	double inputs2[] = {0, 1};
-	double outputs2[] = { 1 };
-	//train(*nn, inputs2, outputs2, costFuncToStop, maxTrainCycles);
-
-	// input 0,0 output 0
-	double inputs3[] = {0, 0};
-	double outputs3[] = { 0 };
-	//train(*nn, inputs3, outputs3, costFuncToStop, maxTrainCycles);
-
-	/*int examplesQuantity = 4;
-	double **groupInputs = malloc(examplesQuantity * sizeof(double*));
-	double **groupOutputs = malloc(examplesQuantity * sizeof(double*));
-	for(int i = 0; i < examplesQuantity; i++) {
-
-	}*/
-	/*double groupInputs[] = {
-				1, 1,
-       				1, 0,
-				0, 1,
-				0, 0
-	};
-	double groupOutputs[] = {
-				0,
-				1,
-				1,
-				0
-	};
-	trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//free(groupInputs);
-	//free(groupOutputs);
-
-	printf("\ntest:\n");
-
-	calculate(*nn, inputs);
-	printNetwork(*nn);
-	costFunction(*nn, outputs);
-
-	calculate(*nn, inputs1);
-	printNetwork(*nn);
-	costFunction(*nn, outputs1);
-
-	calculate(*nn, inputs2);
-	printNetwork(*nn);
-	costFunction(*nn, outputs2);
-
-	calculate(*nn, inputs3);
-	printNetwork(*nn);
-	costFunction(*nn, outputs3);
-*/
-
-	//testXOR(*nn);
-	//testOR(*nn);
-	//testAND(*nn);
-
-	printNetworkInFile(*nn);
-
-	destroyNetwork(&nn);
-	printf("nn destroyed %p\n", nn);
+	//testXOR();
+	//testOR();
+	//testAND();
 
 	testMNIST();
 
