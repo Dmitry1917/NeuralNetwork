@@ -16,6 +16,10 @@ void closeLogs() {
 	if(logsFile != NULL) fclose(logsFile);
 }
 
+int sign(int x) {
+	return (x > 0) - (x < 0);
+}
+
 double randomf(double from, double to) {
 	double interval = to - from;
 	assert(interval > 0);
@@ -46,7 +50,8 @@ struct Neuron {
 	double* weights;
 	double bias;
 	enum ActivationFunctionType aft;
-	// for last results, that will be used afterwards in training
+	// For last results, that will be used afterwards in training
+	// Try to move this data to network itself, as two arrays for better performance.
 	int resCount;
 	double *results;
 	double *deltas;
@@ -214,27 +219,35 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 }
 
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
-	if(resIndex < 0) {
+	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresult index < 0\n");
 		exit(1);
-	}
+	}*/
 	for(int i = 0; i < nn.inputLayerNeuronsCount; i++) {
 		nn.net[i].results[resIndex] = inputs[i];
 	}
 
-	int maxPrevLayerCount = nn.inputLayerNeuronsCount;
-	if(maxPrevLayerCount < nn.neuronsPerHiddenLayer) maxPrevLayerCount = nn.neuronsPerHiddenLayer;
+	int maxPrevLayerCount = (nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer + abs(nn.inputLayerNeuronsCount - nn.neuronsPerHiddenLayer)) / 2;
 	double *prevLayerRes = malloc(sizeof(double) * maxPrevLayerCount);
 
-	for(int i = nn.inputLayerNeuronsCount; i < nn.neuronsCount; i++) {
+	// Process first hidden layer separately for performance.
+	int i = nn.inputLayerNeuronsCount;
+	for(; i < nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer; i++) {
 		struct Neuron n = nn.net[i];
 
-		int previousLayerFirstIndex;
-		if(n.layer == 1) {
-			previousLayerFirstIndex = 0;
-		} else {
-			previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n.layer - 2);
+		for(int k = 0; k < n.weightsCount; k++) {
+			prevLayerRes[k] = nn.net[k].results[resIndex];
 		}
+
+		double res = activation(n, prevLayerRes, n.weightsCount);
+
+		nn.net[i].results[resIndex] = res;
+	}
+	// From second hidden layer till the end.
+	for(; i < nn.neuronsCount; i++) {
+		struct Neuron n = nn.net[i];
+
+		int previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n.layer - 2);
 
 		for(int k = 0; k < n.weightsCount; k++) {
 			prevLayerRes[k] = nn.net[previousLayerFirstIndex + k].results[resIndex];
@@ -414,10 +427,10 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int trainBl
 
 // add bias in formula after main mechanics work
 void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
-	if(resIndex < 0) {
+	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresIndex < 0\n");
 		exit(1);
-	}
+	}*/
 	// neurons
 	int lastLayerFirstIndex = nn.inputLayerNeuronsCount + nn.hiddenLayersCount * nn.neuronsPerHiddenLayer;
 	for(int i = lastLayerFirstIndex + nn.outputLayerNeuronsCount - 1; i >= nn.inputLayerNeuronsCount; i--) {
@@ -450,18 +463,25 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 }
 
 void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
-	if(trainBlockSize < 1) {
+	/*if(trainBlockSize < 1) {
 		fprintf(stderr, "\ntrain size < 1\n");
+	}*/
+	double trainKoeff;
+	switch(nn.net[0].aft) {
+		case sigmoid:
+			trainKoeff = 2.8;
+			break;
+		case ReLU:
+			trainKoeff = 0.09;
+			break;
 	}
-	double trainKoeff = nn.net[0].aft == sigmoid ? 2.8 : 0.09;
-
-	for(int i = nn.inputLayerNeuronsCount; i < nn.inputLayerNeuronsCount + nn.outputLayerNeuronsCount + nn.hiddenLayersCount * nn.neuronsPerHiddenLayer; i++) {
+	for(int i = nn.inputLayerNeuronsCount; i < nn.neuronsCount; i++) {
 		struct Neuron *n = &(nn.net[i]);
+		int previousLayerFirstIndex;
+		if(n->layer == 1) previousLayerFirstIndex = 0;
+		else previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n->layer - 2);
+
 		for(int k = 0; k < n->weightsCount; k++) {
-			int previousLayerFirstIndex;
-			if(n->layer == 1) previousLayerFirstIndex = 0;
-			else previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n->layer - 2);
-			
 			double gradientOfWeight = 0;
 			for(int block = 0; block < trainBlockSize; block++) {
 				double sigma = nn.net[previousLayerFirstIndex + k].results[block];
