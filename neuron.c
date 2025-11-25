@@ -38,6 +38,25 @@ void shuffle(int* array, int length) {
 	}
 }
 
+double dotProduct(double *array1, double* array2, int count) {
+	double res = 0;
+	int i = 0;
+
+	// Surprisingly good optimization - MNIST 10 cycles train and check time drop from 1:45 to 1:15 from this alone. Increasing hardcode more dont provide benefits.
+	for(; i < count - 5; i += 5) {
+		res += array1[i] * array2[i] +
+			array1[i+1] * array2[i+1] +
+			array1[i+2] * array2[i+2] +
+			array1[i+3] * array2[i+3] +
+			array1[i+4] * array2[i+4];
+	}
+	for(; i < count; i++) {
+		res += array1[i] * array2[i];
+	}
+
+	return res;
+}
+
 enum ActivationFunctionType {
 	sigmoid,
 	ReLU
@@ -47,16 +66,14 @@ struct Neuron {
 	int layer;
 	int index;
 	int weightsCount;
-	double* weights;
-	double bias;
 	enum ActivationFunctionType aft;
 };
-
+/*
 double propagation(struct Neuron neuron, double* inputs, int inputsCount) {
-	/*if(neuron.weightsCount != inputsCount) {
-		fprintf(stderr, "Inputs and weights different quantities");
-		exit(1);
-	}*/
+//	if(neuron.weightsCount != inputsCount) {
+//		fprintf(stderr, "Inputs and weights different quantities");
+//		exit(1);
+//	}
 	double res = 0;
 	int i = 0;
 
@@ -74,13 +91,13 @@ double propagation(struct Neuron neuron, double* inputs, int inputsCount) {
 
 	res += neuron.bias;
 	return res;
-}
-
+}*/
+/*
 double activation(struct Neuron neuron, double* inputs, int inputsCount) {
-	/*if(neuron.weightsCount != inputsCount) {
-		fprintf(stderr, "Inputs and weights different quantities");
-		exit(1);
-	}*/
+//	if(neuron.weightsCount != inputsCount) {
+//		fprintf(stderr, "Inputs and weights different quantities");
+//		exit(1);
+//	}
 
 	double arg = propagation(neuron, inputs, inputsCount);
 	double res;
@@ -94,6 +111,15 @@ double activation(struct Neuron neuron, double* inputs, int inputsCount) {
 	}
 
 	return res;
+}
+*/
+double activation(double propagation, enum ActivationFunctionType aft) {
+	switch(aft) {
+		case sigmoid:
+			return 1 / (1 + pow(M_E, -propagation));
+		case ReLU:
+			return propagation < 0 ? 0 : propagation;
+	}
 }
 
 double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType aft) {
@@ -124,6 +150,8 @@ struct NeuralNetwork {
 	// Results go like this: allResults_block1, allResults_block2 ... allResults_last
 	double *resData;
 	double *deltasData;
+	double *weights;
+	double *bias;
 };
 
 struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aft) {
@@ -142,32 +170,20 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->lastCosts = calloc(trainBlockSize, sizeof(double));
 	nn->resData = calloc(trainBlockSize * neuronsCount, sizeof(double));
 	nn->deltasData = calloc(trainBlockSize * neuronsCount, sizeof(double));
+	// First hidden layer has number of weights equal to input layer neurons number multiplied to number of neurons in layer itself, the same logic applied to other hidden layers and output layer.
+	// WARNING it work only if hidden layers exist - percepton will fail.
+	nn->weights = malloc((inputLayerNeuronsCount * neuronsPerHiddenLayer + (hiddenLayersCount - 1) * neuronsPerHiddenLayer * neuronsPerHiddenLayer + neuronsPerHiddenLayer * outputLayerNeuronsCount) * sizeof(double));
+	nn->bias = malloc((neuronsCount - inputLayerNeuronsCount) * sizeof(double));
 
 	// input layer
 	for(int i = 0; i < inputLayerNeuronsCount; i++) {
 		nn->net[i].layer = 0;
 		nn->net[i].index = i;
 		nn->net[i].weightsCount = 1;
-		nn->net[i].weights = malloc(sizeof(double));
-		nn->net[i].weights[0] = 1;
-		nn->net[i].bias = 0;
 		nn->net[i].aft = aft;
 	}
 
-	// output layer
-	for(int i = 0; i < outputLayerNeuronsCount; i++) {
-		int il = i + nn->lastLayerFirstIndex;
-		nn->net[il].layer = 1 + hiddenLayersCount;
-		nn->net[il].index = i;
-		nn->net[il].weightsCount = neuronsPerHiddenLayer;
-		nn->net[il].weights = malloc(neuronsPerHiddenLayer * sizeof(double));
-		for(int k = 0; k < neuronsPerHiddenLayer; k++) {
-			nn->net[il].weights[k] = randomf(-1, 1);
-		}
-		nn->net[il].bias = randomf(-2, 2);
-		nn->net[il].aft = aft;
-	}
-
+	int weightIndex = 0;
 	// hidden layers
 	for(int l = 0; l < hiddenLayersCount; l++) {
 		for(int i = 0; i < neuronsPerHiddenLayer; i++) {
@@ -182,25 +198,42 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			}
 			
 			nn->net[il].weightsCount = previousLayerNeuronsCount;
-			nn->net[il].weights = malloc(previousLayerNeuronsCount * sizeof(double));
 			for(int k = 0; k < previousLayerNeuronsCount; k++) {
-				nn->net[il].weights[k] = randomf(-1, 1);
+				double w = randomf(-1, 1);
+				nn->weights[weightIndex] = w;
+				weightIndex++;
 			}
-			nn->net[il].bias = randomf(-2, 2);
+			double bias = randomf(-2, 2);
+			nn->bias[il - inputLayerNeuronsCount] = bias;
 			nn->net[il].aft = aft;
 		}
+	}
+
+	// output layer
+	for(int i = 0; i < outputLayerNeuronsCount; i++) {
+		int il = i + nn->lastLayerFirstIndex;
+		nn->net[il].layer = 1 + hiddenLayersCount;
+		nn->net[il].index = i;
+		nn->net[il].weightsCount = neuronsPerHiddenLayer;
+		for(int k = 0; k < neuronsPerHiddenLayer; k++) {
+			double w = randomf(-1, 1);
+			nn->weights[weightIndex] = w;
+			weightIndex++;
+		}
+		double bias = randomf(-2, 2);
+		nn->bias[il - inputLayerNeuronsCount] = bias;
+		nn->net[il].aft = aft;
 	}
 
 	return nn;
 }
 
 void destroyNetwork(struct NeuralNetwork **nn) {
-	for(int i = 0; i < (**nn).neuronsCount; i++) {
-		free((**nn).net[i].weights);
-	}
 	free((**nn).net);
 	free((**nn).resData);
 	free((**nn).deltasData);
+	free((**nn).weights);
+	free((**nn).bias);
 	free((**nn).lastCosts);
 	free(*nn);
 	*nn = NULL;
@@ -215,19 +248,11 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	for(int i = 0; i < nn.inputLayerNeuronsCount; i++) {
 		nn.resData[resIndexShift + i] = inputs[i];
 	}
-
-	//int maxPrevLayerCount = (nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer + abs(nn.inputLayerNeuronsCount - nn.neuronsPerHiddenLayer)) / 2;
-	//double *prevLayerRes = malloc(sizeof(double) * maxPrevLayerCount);
-
+/*
 	// Process first hidden layer separately for performance.
 	int i = nn.inputLayerNeuronsCount;
 	for(; i < nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer; i++) {
 		struct Neuron n = nn.net[i];
-/*
-		for(int k = 0; k < n.weightsCount; k++) {
-			prevLayerRes[k] = nn.net[k].results[resIndex];
-		}
-*/
 		double *prevLayerRes = nn.resData + resIndexShift;
 		double res = activation(n, prevLayerRes, n.weightsCount);
 
@@ -238,17 +263,64 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 		struct Neuron n = nn.net[i];
 
 		int previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n.layer - 2);
-/*
-		for(int k = 0; k < n.weightsCount; k++) {
-			prevLayerRes[k] = nn.net[previousLayerFirstIndex + k].results[resIndex];
-		}
-*/
 		double *prevLayerRes = nn.resData + resIndexShift + previousLayerFirstIndex;
 		double res = activation(n, prevLayerRes, n.weightsCount);
 
 		nn.resData[resIndexShift + i] = res;
 	}
-	//free(prevLayerRes);
+*/
+	// First hidden layer.
+	double *weights = nn.weights;
+	double *bias = nn.bias;
+	double *prevLayerRes = nn.resData + resIndexShift;
+	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
+	for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
+		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
+		/*for(int k = 0; k < nn.inputLayerNeuronsCount; k++) {
+			propagation += *weights * prevLayerRes[k];
+			// TODO Check preformance, then work properly.
+			weights++;
+		}*/
+		propagation += *bias;
+		weights += nn.inputLayerNeuronsCount;
+		bias++;
+		*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
+		resData++;
+	}
+
+	// Other hidden layers
+	prevLayerRes += nn.inputLayerNeuronsCount;
+	for(int layer = 1; layer < nn.hiddenLayersCount; layer ++) {
+		for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
+			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+			/*for(int k = 0; k < nn.neuronsPerHiddenLayer; k++) {
+				propagation += *weights * prevLayerRes[k];
+				// TODO Check preformance, then work properly.
+				weights++;
+			}*/
+			propagation += *bias;
+			weights += nn.neuronsPerHiddenLayer;
+			bias++;
+			*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
+			resData++;
+		}
+		prevLayerRes += nn.neuronsPerHiddenLayer;
+	}
+
+	// Output layer.
+	for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+		double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+		/*for(int k = 0; k < nn.neuronsPerHiddenLayer; k++) {
+			propagation += *weights * prevLayerRes[k];
+			// TODO Check preformance, then work properly.
+			weights++;
+		}*/
+		propagation += *bias;
+		weights += nn.neuronsPerHiddenLayer;
+		bias++;
+		*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
+		resData++;
+	}
 }
 
 // for small networks only and one result
@@ -263,6 +335,8 @@ void printNetwork(struct NeuralNetwork nn) {
 	maxHeight = maxHeight > nn.neuronsPerHiddenLayer ? maxHeight : nn.neuronsPerHiddenLayer;
 	int lastLayer = -1;
 	int lastEolXCoord = 0;
+	double *weights = nn.weights;
+	double *bias = nn.bias;
 	for(int i = 0; i < nn.neuronsCount; i++) {
 		struct Neuron n = nn.net[i];
 		int layer = 0;
@@ -299,9 +373,11 @@ void printNetwork(struct NeuralNetwork nn) {
 			printf("%.4f", nn.resData[i]);
 		} else {
 			for(int w = 0; w < n.weightsCount; w++) {
-				printf("%.4f ", n.weights[w]);
+				printf("%.4f ", *weights);
+				weights++;
 			}
-			printf("%.4f ", n.bias);
+			printf("%.4f ", *bias);
+			bias++;
 			//printf("%d %d %d", i, xCoord, n.weightsCount);
 			printf("%.4f %.3f", nn.resData[i], nn.deltasData[i]);
 
@@ -325,31 +401,24 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 	int i = 0;
 	while(level < maxLevel) {
 		struct Neuron n = nn.net[i];
-		int layer = 0;
-		int indexInLayer = i;
-		if(i >= nn.inputLayerNeuronsCount) {
-			if(i < nn.neuronsCount - nn.outputLayerNeuronsCount) {
-				layer = (i - nn.inputLayerNeuronsCount) / nn.neuronsPerHiddenLayer + 1;
-				indexInLayer = (i - nn.inputLayerNeuronsCount) % nn.neuronsPerHiddenLayer;
-			}
-			else {
-				layer = nn.hiddenLayersCount + 1;
-				indexInLayer = nn.outputLayerNeuronsCount - (nn.neuronsCount - i);
-			}
-		}
-
 		char neuronInfo[30];
-		if(layer == 0) {
+		if(n.layer == 0) {
 			fprintf(logsFile, "\nneuron ");
 			for(int r = 0; r < nn.trainBlockSize; r++) {
 				fprintf(logsFile, "res%d: %.4f ", r, nn.resData[nn.neuronsCount * r + i]);
 			}
 		} else {
-			fprintf(logsFile, "neuron layer %d index %d weights: ", layer, indexInLayer);
-			for(int w = 0; w < n.weightsCount; w++) {
-				fprintf(logsFile, "%.4f ", n.weights[w]);
+			fprintf(logsFile, "neuron layer %d index %d weights: ", n.layer, n.index);
+			int firstWeightIndex;
+			if(n.layer == 1) {
+				firstWeightIndex = nn.inputLayerNeuronsCount * n.index;
+			} else {
+				firstWeightIndex = nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (n.layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + n.index * nn.neuronsPerHiddenLayer;
 			}
-			fprintf(logsFile, "bias: %.4f ", n.bias);
+			for(int w = 0; w < n.weightsCount; w++) {
+				fprintf(logsFile, "%.4f ", nn.weights[firstWeightIndex + w]);
+			}
+			fprintf(logsFile, "bias: %.4f ", nn.bias[i - nn.inputLayerNeuronsCount]);
 			//printf("%d %d %d", i, xCoord, n.weightsCount);
 			for(int r = 0; r < nn.trainBlockSize; r++) {
 				fprintf(logsFile, "res%d: %.4f delta%d: %.3f ", r, nn.resData[nn.neuronsCount * r + i], r, nn.deltasData[nn.neuronsCount * r + i]);
@@ -454,11 +523,14 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 		double delta = lastActivationDerivative * dErrorBydSigma;
 		nn.deltasData[resIndexShift + i] = delta;
 	}
+
+	// Start with last weight, to go backwards during calculations, using next layer neurons.
+	double *nextLayerLastWeight = nn.weights + nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount - 1;
+	double *nextLayerLastWeightForCurrentNeuron = nextLayerLastWeight;
 	for(; i >= nn.inputLayerNeuronsCount; i--) {
 		struct Neuron *n = &(nn.net[i]);
 
-		int indexInLayer = i;
-		if(i >= nn.inputLayerNeuronsCount) indexInLayer = (i - nn.inputLayerNeuronsCount) % nn.neuronsPerHiddenLayer;
+		int indexInLayer = n->index;
 
 		// look and sum next layer neuron deltas, multiplied by weights
 		int nextLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * n->layer;
@@ -467,11 +539,19 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 		if(n->layer == nn.hiddenLayersCount) nextLayerNeuronsCount = nn.outputLayerNeuronsCount;
 		else nextLayerNeuronsCount = nn.neuronsPerHiddenLayer;
 
+		double *weight = nextLayerLastWeightForCurrentNeuron;
 		double dErrorBydSigma = 0;
-		for(int k = nextLayerFirstIndex; k < nextLayerFirstIndex + nextLayerNeuronsCount; k++) {
-			struct Neuron nextLayerNeuron = nn.net[k];
-			dErrorBydSigma += nn.deltasData[resIndexShift + k] * nextLayerNeuron.weights[indexInLayer];
+		for(int k = nextLayerFirstIndex + nextLayerNeuronsCount - 1; k >= nextLayerFirstIndex; k--) {
+			//struct Neuron nextLayerNeuron = nn.net[k];
+			dErrorBydSigma += nn.deltasData[resIndexShift + k] * (*weight); //nextLayerNeuron.weights[indexInLayer];
+			weight -= nn.neuronsPerHiddenLayer;
 		}
+
+		if(indexInLayer == 0) {
+			nextLayerLastWeight -= nextLayerNeuronsCount * nn.neuronsPerHiddenLayer;
+			nextLayerLastWeightForCurrentNeuron = nextLayerLastWeight;
+		}
+		else nextLayerLastWeightForCurrentNeuron -= 1;
 
 		double lastRes = nn.resData[resIndexShift + i]; 
 		double lastActivationDerivative = derivativeOfLastActivation(lastRes, n->aft);
@@ -497,29 +577,35 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 		struct Neuron *n = &(nn.net[i]);
 		int previousLayerFirstIndex;
 		int previousLayerNeuronsCount;
+		// First weight of current neuron.
+		double *weight;
+		// Bias of current neuron.
+		double *bias;
 		if(n->layer == 1) {
 			previousLayerFirstIndex = 0;
 			previousLayerNeuronsCount = nn.inputLayerNeuronsCount;
-		}
-		else {
+			weight = nn.weights + n->index * nn.inputLayerNeuronsCount;
+		} else {
 			previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n->layer - 2);
 			previousLayerNeuronsCount = nn.neuronsPerHiddenLayer;
+			weight = nn.weights + nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (n->layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + n->index * nn.neuronsPerHiddenLayer;
 		}
+		bias = nn.bias + i - nn.inputLayerNeuronsCount;
 
 		// for bias formula remain the same, except derivative of propagation function by bias is 1, since its constant
 		double sumOfDeltas = 0;
 		for(int block = 0; block < trainBlockSize; block++) {
 			int trainBlockShift = nn.neuronsCount * block;
-			for(int k = 0; k < n->weightsCount; k++) {
+			for(int k = 0; k < previousLayerNeuronsCount; k++) {
 				int previousLayerNeuronsIndexForWeight = previousLayerFirstIndex + k;
 				double sigma = nn.resData[trainBlockShift + previousLayerNeuronsIndexForWeight];
 				double gradientOfWeightReducedByTrainBlocks = sigma * nn.deltasData[trainBlockShift + i] / trainBlockSize;
 				
-				n->weights[k] -= trainKoeff * gradientOfWeightReducedByTrainBlocks;
+				weight[k] -= trainKoeff * gradientOfWeightReducedByTrainBlocks;
 			}
 			sumOfDeltas += nn.deltasData[trainBlockShift + i];
 		}
-		n->bias -= trainKoeff * sumOfDeltas / trainBlockSize;
+		*bias -= trainKoeff * sumOfDeltas / trainBlockSize;
 	}
 }
 
