@@ -4,6 +4,7 @@
 #include <math.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 FILE *logsFile = NULL;
 
@@ -116,7 +117,7 @@ double activation(struct Neuron neuron, double* inputs, int inputsCount) {
 double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
-			return 1 / (1 + pow(M_E, -propagation));
+			return 1 / (1 + exp(-propagation));
 		case ReLU:
 			return propagation < 0 ? 0 : propagation;
 	}
@@ -573,39 +574,33 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 			trainKoeff = 0.09;
 			break;
 	}
-	for(int i = nn.inputLayerNeuronsCount; i < nn.neuronsCount; i++) {
-		struct Neuron *n = &(nn.net[i]);
-		int previousLayerFirstIndex;
-		int previousLayerNeuronsCount;
-		// First weight of current neuron.
-		double *weight;
-		// Bias of current neuron.
-		double *bias;
-		if(n->layer == 1) {
-			previousLayerFirstIndex = 0;
-			previousLayerNeuronsCount = nn.inputLayerNeuronsCount;
-			weight = nn.weights + n->index * nn.inputLayerNeuronsCount;
-		} else {
-			previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n->layer - 2);
-			previousLayerNeuronsCount = nn.neuronsPerHiddenLayer;
-			weight = nn.weights + nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (n->layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + n->index * nn.neuronsPerHiddenLayer;
-		}
-		bias = nn.bias + i - nn.inputLayerNeuronsCount;
+	double trainBlockCoeff = 1.0 / trainBlockSize;
 
-		// for bias formula remain the same, except derivative of propagation function by bias is 1, since its constant
-		double sumOfDeltas = 0;
-		for(int block = 0; block < trainBlockSize; block++) {
-			int trainBlockShift = nn.neuronsCount * block;
-			for(int k = 0; k < previousLayerNeuronsCount; k++) {
-				int previousLayerNeuronsIndexForWeight = previousLayerFirstIndex + k;
-				double sigma = nn.resData[trainBlockShift + previousLayerNeuronsIndexForWeight];
-				double gradientOfWeightReducedByTrainBlocks = sigma * nn.deltasData[trainBlockShift + i] / trainBlockSize;
-				
-				weight[k] -= trainKoeff * gradientOfWeightReducedByTrainBlocks;
+	int previousLayerFirstIndex = 0;
+	int previousLayerNeuronsCount = nn.inputLayerNeuronsCount;
+	int currentLayerNeuronsCount = nn.neuronsPerHiddenLayer;
+	for(int layer = 1; layer <= nn.hiddenLayersCount + 1; layer++) {
+		bool firstHidden = layer == 1;
+		for(int index = 0; index < currentLayerNeuronsCount; index++) {
+			int neuronTotalIndex = nn.inputLayerNeuronsCount + (layer - 1) * nn.neuronsPerHiddenLayer + index;
+			double *weight = nn.weights + index * previousLayerNeuronsCount + !firstHidden * (nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer);
+			double *bias = nn.bias + neuronTotalIndex - nn.inputLayerNeuronsCount;
+			double sumOfDeltas = 0;
+			for(int block = 0; block < trainBlockSize; block++) {
+				int trainBlockShift = nn.neuronsCount * block;
+				double *resultsOfPreviousLayer = nn.resData + trainBlockShift + previousLayerFirstIndex;//It's content is sigma in formulas.
+				double deltaReducedByTrainBlocks = nn.deltasData[trainBlockShift + neuronTotalIndex] * trainBlockCoeff;
+				for(int k = 0; k < previousLayerNeuronsCount; k++) {
+					weight[k] -= trainKoeff * (*resultsOfPreviousLayer) * deltaReducedByTrainBlocks;// Multiplication of last two is gradient of weight, divided by number of training blocks.
+					resultsOfPreviousLayer++;
+				}
+				sumOfDeltas += nn.deltasData[trainBlockShift + neuronTotalIndex];
 			}
-			sumOfDeltas += nn.deltasData[trainBlockShift + i];
+			*bias -= trainKoeff * sumOfDeltas * trainBlockCoeff;
 		}
-		*bias -= trainKoeff * sumOfDeltas / trainBlockSize;
+		previousLayerNeuronsCount = currentLayerNeuronsCount;
+		if(layer == nn.hiddenLayersCount) currentLayerNeuronsCount = nn.outputLayerNeuronsCount;
+		previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (layer - 1);
 	}
 }
 
