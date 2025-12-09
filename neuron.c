@@ -5,6 +5,7 @@
 #include <time.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 FILE *logsFile = NULL;
 
@@ -240,6 +241,31 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	*nn = NULL;
 }
 
+struct ProcessActivationData {
+	enum ActivationFunctionType aft;
+	int weightsNumber;
+	double *prevLayerResults;
+	double *weights;
+	double *bias;
+	double *resData;
+	double neuronsCount;
+};
+
+void* processActivation(void *pad) {
+	struct ProcessActivationData *data = (struct ProcessActivationData *)pad;
+	double *weights = data->weights;
+	double *bias = data->bias;
+	double *resData = data->resData;
+	for(int i = 0; i < data->neuronsCount; i++) {
+		double propagation = dotProduct(weights, data->prevLayerResults, data->weightsNumber);
+		propagation += *bias;
+		weights += data->weightsNumber;
+		bias++;
+		*resData = activation(propagation, data->aft);
+		resData++;
+	}
+}
+
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresult index < 0\n");
@@ -275,13 +301,39 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	double *bias = nn.bias;
 	double *prevLayerRes = nn.resData + resIndexShift;
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
+/*
+	// Threading
+	int threadNumber = 2;
+	pthread_t threads[2];
+	int neuronsPerThread = nn.neuronsPerHiddenLayer / threadNumber;
+	int lastThreadNeurons = nn.neuronsPerHiddenLayer % threadNumber;
+	// To not go beyound threadNumber, add rest of neurons to the last operation.
+	if(lastThreadNeurons > 0) lastThreadNeurons += neuronsPerThread;
+	for(int threadId = 0; threadId < threadNumber; threadId++) {
+		pthread_t thread;
+		struct ProcessActivationData data;
+		data.weightsNumber = nn.inputLayerNeuronsCount;
+		data.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+		data.prevLayerResults = prevLayerRes;
+		data.weights = weights + threadId * neuronsPerThread * nn.inputLayerNeuronsCount;
+		data.bias = bias + threadId * neuronsPerThread;
+		data.resData = resData + threadId * neuronsPerThread;
+		if(threadId == threadNumber - 1 && lastThreadNeurons > 0) {
+			data.neuronsCount = lastThreadNeurons;
+		} else {
+			data.neuronsCount = neuronsPerThread;
+		}
+		pthread_create(&threads[threadId], NULL, processActivation, &data);
+	}
+	for(int threadId = 0; threadId < threadNumber; threadId ++) {
+		pthread_join(threads[threadId], NULL);
+	}
+	weights += nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer;
+	bias += nn.neuronsPerHiddenLayer;
+	resData += nn.neuronsPerHiddenLayer;
+*/
 	for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
 		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
-		/*for(int k = 0; k < nn.inputLayerNeuronsCount; k++) {
-			propagation += *weights * prevLayerRes[k];
-			// TODO Check preformance, then work properly.
-			weights++;
-		}*/
 		propagation += *bias;
 		weights += nn.inputLayerNeuronsCount;
 		bias++;
