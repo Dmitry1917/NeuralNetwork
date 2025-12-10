@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 FILE *logsFile = NULL;
 
@@ -248,8 +249,12 @@ struct ProcessActivationData {
 	double *weights;
 	double *bias;
 	double *resData;
-	double neuronsCount;
+	int neuronsCount;
 };
+
+sem_t sem1, sem2, sem3;
+pthread_t thread1, thread2, thread3;
+struct ProcessActivationData *pad1, *pad2, *pad3;
 
 void* processActivation(void *pad) {
 	struct ProcessActivationData *data = (struct ProcessActivationData *)pad;
@@ -266,6 +271,74 @@ void* processActivation(void *pad) {
 	}
 }
 
+void *processActivationQueue1(void *args) {
+	int prevType;
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
+
+	while(1) {
+		if(pad1) {
+			double *weights = pad1->weights;
+			double *bias = pad1->bias;
+			double *resData = pad1->resData;
+			for(int i = 0; i < pad1->neuronsCount; i++) {
+				double propagation = dotProduct(weights, pad1->prevLayerResults, pad1->weightsNumber);
+				propagation += *bias;
+				weights += pad1->weightsNumber;
+				bias++;
+				*resData = activation(propagation, pad1->aft);
+				resData++;
+			}
+			pad1 = NULL;
+			sem_post(&sem1);
+		}
+	}
+}
+
+void *processActivationQueue2(void *args) {
+	int prevType;
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
+
+	while(1) {
+		if(pad2) {
+			double *weights = pad2->weights;
+			double *bias = pad2->bias;
+			double *resData = pad2->resData;
+			for(int i = 0; i < pad2->neuronsCount; i++) {
+				double propagation = dotProduct(weights, pad2->prevLayerResults, pad2->weightsNumber);
+				propagation += *bias;
+				weights += pad2->weightsNumber;
+				bias++;
+				*resData = activation(propagation, pad2->aft);
+				resData++;
+			}
+			pad2 = NULL;
+			sem_post(&sem2);
+		}
+	}
+}
+
+void *processActivationQueue3(void *args) {
+	int prevType;
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
+
+	while(1) {
+		if(pad3) {
+			double *weights = pad3->weights;
+			double *bias = pad3->bias;
+			double *resData = pad3->resData;
+			for(int i = 0; i < pad3->neuronsCount; i++) {
+				double propagation = dotProduct(weights, pad3->prevLayerResults, pad3->weightsNumber);
+				propagation += *bias;
+				weights += pad3->weightsNumber;
+				bias++;
+				*resData = activation(propagation, pad3->aft);
+				resData++;
+			}
+			pad3 = NULL;
+			sem_post(&sem3);
+		}
+	}
+}
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresult index < 0\n");
@@ -302,7 +375,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	double *prevLayerRes = nn.resData + resIndexShift;
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
 /*
-	// Threading
+	// Threading first crude attempt. Slower than one thread. Clearly contain some error, that causes calculation mistakes in rare cases, but didn't found for now.
 	int threadNumber = 2;
 	pthread_t threads[2];
 	int neuronsPerThread = nn.neuronsPerHiddenLayer / threadNumber;
@@ -328,11 +401,48 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	for(int threadId = 0; threadId < threadNumber; threadId ++) {
 		pthread_join(threads[threadId], NULL);
 	}
+
 	weights += nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer;
 	bias += nn.neuronsPerHiddenLayer;
 	resData += nn.neuronsPerHiddenLayer;
 */
-	for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
+
+	// Threading second version - work significantly faster, than one thread, didn't notice rare errors, like in previous version.
+	struct ProcessActivationData data1, data2, data3;
+	data1.weightsNumber = nn.inputLayerNeuronsCount;
+	data1.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+	data1.prevLayerResults = prevLayerRes;
+	data1.weights = weights;
+	data1.bias = bias;
+	data1.resData = resData;
+	data1.neuronsCount = nn.neuronsPerHiddenLayer / 4;
+
+	data2.weightsNumber = nn.inputLayerNeuronsCount;
+	data2.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+	data2.prevLayerResults = prevLayerRes;
+	data2.weights = weights + data1.neuronsCount * nn.inputLayerNeuronsCount;
+	data2.bias = bias + data1.neuronsCount;
+	data2.resData = resData + data1.neuronsCount;
+	data2.neuronsCount = data1.neuronsCount;
+
+	data3.weightsNumber = nn.inputLayerNeuronsCount;
+	data3.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+	data3.prevLayerResults = prevLayerRes;
+	data3.weights = weights + 2 * data1.neuronsCount * nn.inputLayerNeuronsCount;
+	data3.bias = bias + 2 * data1.neuronsCount;
+	data3.resData = resData + 2 * data1.neuronsCount;
+	data3.neuronsCount = data1.neuronsCount;
+
+	int previousNeurons = 3 * data1.neuronsCount;
+	weights += nn.inputLayerNeuronsCount * previousNeurons;
+	bias += previousNeurons;
+	resData += previousNeurons;
+
+	pad1 = &data1;
+	pad2 = &data2;
+	pad3 = &data3;
+
+	for(int i = previousNeurons; i < nn.neuronsPerHiddenLayer; i++) {
 		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
 		propagation += *bias;
 		weights += nn.inputLayerNeuronsCount;
@@ -341,6 +451,19 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 		resData++;
 	}
 
+	sem_wait(&sem1);
+	sem_wait(&sem2);
+	sem_wait(&sem3);
+/*
+	for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
+		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
+		propagation += *bias;
+		weights += nn.inputLayerNeuronsCount;
+		bias++;
+		*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
+		resData++;
+	}
+*/
 	// Other hidden layers
 	prevLayerRes += nn.inputLayerNeuronsCount;
 	for(int layer = 1; layer < nn.hiddenLayersCount; layer ++) {
@@ -1169,10 +1292,25 @@ void testMNIST() {
 	globalValMNISTOutputs = mnistTestLabels.data;
 	globalValMNISTExamplesQuantity = mnistTestImages.count;
 
+
+	sem_init(&sem1, 0, 0);
+	sem_init(&sem2, 0, 0);
+	sem_init(&sem3, 0, 0);
+	pthread_create(&thread1, NULL, processActivationQueue1, NULL);
+	pthread_create(&thread2, NULL, processActivationQueue2, NULL);
+	pthread_create(&thread3, NULL, processActivationQueue3, NULL);
+
 	//trainByGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles);
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles, trainBlockSize, testNetworkByMNISTDataForFunctionParam);
 
 	//testNetworkByMNISTData(*nn, inputsTest, outputsTest, mnistTestImages.count);
+
+	pthread_cancel(thread1);
+	pthread_cancel(thread2);
+	pthread_cancel(thread3);
+	sem_destroy(&sem1);
+	sem_destroy(&sem2);
+	sem_destroy(&sem3);
 
 	free(inputs);
 	free(outputs);
