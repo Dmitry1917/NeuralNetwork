@@ -406,7 +406,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	bias += nn.neuronsPerHiddenLayer;
 	resData += nn.neuronsPerHiddenLayer;
 */
-
+/*
 	// Threading second version - work significantly faster, than one thread, didn't notice rare errors, like in previous version.
 	struct ProcessActivationData data1, data2, data3;
 	data1.weightsNumber = nn.inputLayerNeuronsCount;
@@ -454,7 +454,163 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	sem_wait(&sem1);
 	sem_wait(&sem2);
 	sem_wait(&sem3);
+
+	// Other hidden layers
+	prevLayerRes += nn.inputLayerNeuronsCount;
+	for(int layer = 1; layer < nn.hiddenLayersCount; layer++) {
+		data1.weightsNumber = nn.neuronsPerHiddenLayer;
+		data1.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+		data1.prevLayerResults = prevLayerRes;
+		data1.weights = weights;
+		data1.bias = bias;
+		data1.resData = resData;
+		data1.neuronsCount = nn.neuronsPerHiddenLayer / 4;
+	
+		data2.weightsNumber = nn.neuronsPerHiddenLayer;
+		data2.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+		data2.prevLayerResults = prevLayerRes;
+		data2.weights = weights + data1.neuronsCount * nn.neuronsPerHiddenLayer;
+		data2.bias = bias + data1.neuronsCount;
+		data2.resData = resData + data1.neuronsCount;
+		data2.neuronsCount = data1.neuronsCount;
+	
+		data3.weightsNumber = nn.neuronsPerHiddenLayer;
+		data3.aft = nn.net[nn.inputLayerNeuronsCount].aft;
+		data3.prevLayerResults = prevLayerRes;
+		data3.weights = weights + 2 * data1.neuronsCount * nn.neuronsPerHiddenLayer;
+		data3.bias = bias + 2 * data1.neuronsCount;
+		data3.resData = resData + 2 * data1.neuronsCount;
+		data3.neuronsCount = data1.neuronsCount;
+	
+		previousNeurons = 3 * data1.neuronsCount;
+		weights += nn.neuronsPerHiddenLayer * previousNeurons;
+		bias += previousNeurons;
+		resData += previousNeurons;
+	
+		pad1 = &data1;
+		pad2 = &data2;
+		pad3 = &data3;
+
+		for(int i = previousNeurons; i < nn.neuronsPerHiddenLayer; i++) {
+			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+			propagation += *bias;
+			weights += nn.neuronsPerHiddenLayer;
+			bias++;
+			*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
+			resData++;
+		}
+		sem_wait(&sem1);
+		sem_wait(&sem2);
+		sem_wait(&sem3);
+
+		prevLayerRes += nn.neuronsPerHiddenLayer;
+	}
+
+	// Output layer.
+	data1.weightsNumber = nn.neuronsPerHiddenLayer;
+	data1.aft = nn.net[nn.neuronsCount - 1].aft;
+	data1.prevLayerResults = prevLayerRes;
+	data1.weights = weights;
+	data1.bias = bias;
+	data1.resData = resData;
+	data1.neuronsCount = nn.outputLayerNeuronsCount / 4;
+
+	data2.weightsNumber = nn.neuronsPerHiddenLayer;
+	data2.aft = nn.net[nn.neuronsCount - 1].aft;
+	data2.prevLayerResults = prevLayerRes;
+	data2.weights = weights + data1.neuronsCount * nn.neuronsPerHiddenLayer;
+	data2.bias = bias + data1.neuronsCount;
+	data2.resData = resData + data1.neuronsCount;
+	data2.neuronsCount = data1.neuronsCount;
+
+	data3.weightsNumber = nn.neuronsPerHiddenLayer;
+	data3.aft = nn.net[nn.neuronsCount - 1].aft;
+	data3.prevLayerResults = prevLayerRes;
+	data3.weights = weights + 2 * data1.neuronsCount * nn.neuronsPerHiddenLayer;
+	data3.bias = bias + 2 * data1.neuronsCount;
+	data3.resData = resData + 2 * data1.neuronsCount;
+	data3.neuronsCount = data1.neuronsCount;
+
+	previousNeurons = 3 * data1.neuronsCount;
+	weights += nn.neuronsPerHiddenLayer * previousNeurons;
+	bias += previousNeurons;
+	resData += previousNeurons;
+
+	pad1 = &data1;
+	pad2 = &data2;
+	pad3 = &data3;
+
+	for(int i = previousNeurons; i < nn.outputLayerNeuronsCount; i++) {
+		double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+		propagation += *bias;
+		weights += nn.neuronsPerHiddenLayer;
+		bias++;
+		*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
+		resData++;
+	}
+
+	sem_wait(&sem1);
+	sem_wait(&sem2);
+	sem_wait(&sem3);
+*/
+
+	// More readable threading version.
+	struct ProcessActivationData data1, data2, data3;
+	for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
+		int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
+		enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
+		int neuronsCount = layer == nn.hiddenLayersCount ? nn.outputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
+
+		data1.weightsNumber = weightsNumber;
+		data1.aft = aft;
+		data1.prevLayerResults = prevLayerRes;
+		data1.weights = weights;
+		data1.bias = bias;
+		data1.resData = resData;
+		data1.neuronsCount = neuronsCount / 4;
+	
+		data2.weightsNumber = weightsNumber;
+		data2.aft = aft;
+		data2.prevLayerResults = prevLayerRes;
+		data2.weights = weights + data1.neuronsCount * weightsNumber;
+		data2.bias = bias + data1.neuronsCount;
+		data2.resData = resData + data1.neuronsCount;
+		data2.neuronsCount = data1.neuronsCount;
+	
+		data3.weightsNumber = weightsNumber;
+		data3.aft = aft;
+		data3.prevLayerResults = prevLayerRes;
+		data3.weights = weights + 2 * data1.neuronsCount * weightsNumber;
+		data3.bias = bias + 2 * data1.neuronsCount;
+		data3.resData = resData + 2 * data1.neuronsCount;
+		data3.neuronsCount = data1.neuronsCount;
+	
+		int previousNeurons = 3 * data1.neuronsCount;
+		weights += previousNeurons * weightsNumber;
+		bias += previousNeurons;
+		resData += previousNeurons;
+	
+		pad1 = &data1;
+		pad2 = &data2;
+		pad3 = &data3;
+
+		for(int i = previousNeurons; i < neuronsCount; i++) {
+			double propagation = dotProduct(weights, prevLayerRes, weightsNumber);
+			propagation += *bias;
+			weights += weightsNumber;
+			bias++;
+			*resData = activation(propagation, aft);
+			resData++;
+		}
+		sem_wait(&sem1);
+		sem_wait(&sem2);
+		sem_wait(&sem3);
+
+		prevLayerRes += weightsNumber;
+	}
+
 /*
+	// One thread.
 	for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
 		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
 		propagation += *bias;
@@ -463,17 +619,12 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 		*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
 		resData++;
 	}
-*/
+
 	// Other hidden layers
 	prevLayerRes += nn.inputLayerNeuronsCount;
 	for(int layer = 1; layer < nn.hiddenLayersCount; layer ++) {
 		for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
 			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-			/*for(int k = 0; k < nn.neuronsPerHiddenLayer; k++) {
-				propagation += *weights * prevLayerRes[k];
-				// TODO Check preformance, then work properly.
-				weights++;
-			}*/
 			propagation += *bias;
 			weights += nn.neuronsPerHiddenLayer;
 			bias++;
@@ -486,17 +637,13 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	// Output layer.
 	for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 		double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-		/*for(int k = 0; k < nn.neuronsPerHiddenLayer; k++) {
-			propagation += *weights * prevLayerRes[k];
-			// TODO Check preformance, then work properly.
-			weights++;
-		}*/
 		propagation += *bias;
 		weights += nn.neuronsPerHiddenLayer;
 		bias++;
 		*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
 		resData++;
 	}
+*/
 }
 
 // for small networks only and one result
