@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <unistd.h>
 
 FILE *logsFile = NULL;
 
@@ -276,6 +277,7 @@ void *processActivationQueue1(void *args) {
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
 
 	while(1) {
+		//usleep(1);// For valgrind - otherwise it takes too long to check.
 		if(pad1) {
 			double *weights = pad1->weights;
 			double *bias = pad1->bias;
@@ -299,6 +301,7 @@ void *processActivationQueue2(void *args) {
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
 
 	while(1) {
+		//usleep(1);// For valgrind - otherwise it takes too long to check.
 		if(pad2) {
 			double *weights = pad2->weights;
 			double *bias = pad2->bias;
@@ -322,6 +325,7 @@ void *processActivationQueue3(void *args) {
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
 
 	while(1) {
+		//usleep(1);// For valgrind - otherwise it takes too long to check.
 		if(pad3) {
 			double *weights = pad3->weights;
 			double *bias = pad3->bias;
@@ -926,6 +930,30 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	}
 }
 
+void startThreading() {
+	// Detached threads free memory after cancel.
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, 1);
+
+	sem_init(&sem1, 0, 0);
+	sem_init(&sem2, 0, 0);
+	sem_init(&sem3, 0, 0);
+	pthread_create(&thread1, &attr, processActivationQueue1, NULL);
+	pthread_create(&thread2, &attr, processActivationQueue2, NULL);
+	pthread_create(&thread3, &attr, processActivationQueue3, NULL);
+	pthread_attr_destroy(&attr);
+}
+
+void stopThreading() {
+	pthread_cancel(thread1);
+	pthread_cancel(thread2);
+	pthread_cancel(thread3);
+	sem_destroy(&sem1);
+	sem_destroy(&sem2);
+	sem_destroy(&sem3);
+}
+
 void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycles) {
 	for(int i = 0; i < maxCycles; i++) {
 		calculate(nn, inputs, 0);
@@ -939,6 +967,8 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycl
 
 // train by one sample at the time, cycling all of them
 void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
+	startThreading();
+
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	printf("\nindexes for shuffle created\n");
@@ -984,10 +1014,14 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 	free(output);
 		
 	free(indexes);
+
+	stopThreading();
 }
 
 // train by all samples at once 
 void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
+	startThreading();
+
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
 	for(int c = 0; c < maxCycles; c++) {
@@ -1009,6 +1043,7 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 		if(cost < costFunctionToStop) {
 			free(input);
 			free(output);
+			stopThreading();
 			return;
 		}
 
@@ -1016,10 +1051,14 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	}
 	free(input);
 	free(output);
+
+	stopThreading();
 }
 
 // train by small batch of samples at once, reshuffling after all batches was processed in current cycle
 void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles, int batchSize, double (*mnistCorrectness)()) {
+	startThreading();
+
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -1081,6 +1120,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 			free(batchOutputs);
 			free(input);
 			free(output);
+			stopThreading();
 			return;
 		}
 	}
@@ -1089,6 +1129,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	free(input);
 	free(output);
 	free(indexes);
+	stopThreading();
 }
 
 void testXOR() {
@@ -1129,6 +1170,8 @@ void testXOR() {
 
 	printf("\ntest xor:\n");
 
+	startThreading();
+
 	calculate(*nn, inputs, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs, 1, stdout);
@@ -1145,6 +1188,8 @@ void testXOR() {
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
 	printNetworkInFile(*nn);
+
+	stopThreading();
 
 	destroyNetwork(&nn);
 }
@@ -1187,6 +1232,8 @@ void testOR() {
 
 	printf("\ntest or:\n");
 
+	startThreading();
+
 	calculate(*nn, inputs, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs, 1, stdout);
@@ -1202,6 +1249,8 @@ void testOR() {
 	calculate(*nn, inputs3, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
+
+	stopThreading();
 
 	destroyNetwork(&nn);
 }
@@ -1244,6 +1293,8 @@ void testAND() {
 
 	printf("\ntest and:\n");
 
+	startThreading();
+
 	calculate(*nn, inputs, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs, 1, stdout);
@@ -1259,6 +1310,8 @@ void testAND() {
 	calculate(*nn, inputs3, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
+
+	stopThreading();
 
 	destroyNetwork(&nn);
 }
@@ -1439,25 +1492,10 @@ void testMNIST() {
 	globalValMNISTOutputs = mnistTestLabels.data;
 	globalValMNISTExamplesQuantity = mnistTestImages.count;
 
-
-	sem_init(&sem1, 0, 0);
-	sem_init(&sem2, 0, 0);
-	sem_init(&sem3, 0, 0);
-	pthread_create(&thread1, NULL, processActivationQueue1, NULL);
-	pthread_create(&thread2, NULL, processActivationQueue2, NULL);
-	pthread_create(&thread3, NULL, processActivationQueue3, NULL);
-
 	//trainByGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles);
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles, trainBlockSize, testNetworkByMNISTDataForFunctionParam);
 
 	//testNetworkByMNISTData(*nn, inputsTest, outputsTest, mnistTestImages.count);
-
-	pthread_cancel(thread1);
-	pthread_cancel(thread2);
-	pthread_cancel(thread3);
-	sem_destroy(&sem1);
-	sem_destroy(&sem2);
-	sem_destroy(&sem3);
 
 	free(inputs);
 	free(outputs);
@@ -1482,5 +1520,7 @@ int main() {
 
 	closeLogs();
 
+	// Wait for all subthreads to finish, to prevent valgrind from false leaks, but turns out it still gives some false positives on linux.
+	//pthread_exit(NULL);
 	return 0;
 }
