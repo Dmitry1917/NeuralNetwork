@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 FILE *logsFile = NULL;
+bool useThreading = false;
 
 void setupLogs() {
 	//logsFile = fopen("logs.txt", "w");
@@ -66,57 +67,6 @@ enum ActivationFunctionType {
 	ReLU
 };
 
-struct Neuron {
-	int layer;
-	int index;
-	int weightsCount;
-	enum ActivationFunctionType aft;
-};
-/*
-double propagation(struct Neuron neuron, double* inputs, int inputsCount) {
-//	if(neuron.weightsCount != inputsCount) {
-//		fprintf(stderr, "Inputs and weights different quantities");
-//		exit(1);
-//	}
-	double res = 0;
-	int i = 0;
-
-	// Surprisingly good optimization - MNIST 10 cycles train and check time drop from 1:45 to 1:15 from this alone. Increasing hardcode more dont provide benefits.
-	for(; i < inputsCount - 5; i += 5) {
-		res += neuron.weights[i] * inputs[i] +
-			neuron.weights[i+1] * inputs[i+1] +
-			neuron.weights[i+2] * inputs[i+2] +
-			neuron.weights[i+3] * inputs[i+3] +
-			neuron.weights[i+4] * inputs[i+4];
-	}
-	for(; i < inputsCount; i++) {
-		res += neuron.weights[i] * inputs[i];
-	}
-
-	res += neuron.bias;
-	return res;
-}*/
-/*
-double activation(struct Neuron neuron, double* inputs, int inputsCount) {
-//	if(neuron.weightsCount != inputsCount) {
-//		fprintf(stderr, "Inputs and weights different quantities");
-//		exit(1);
-//	}
-
-	double arg = propagation(neuron, inputs, inputsCount);
-	double res;
-	switch(neuron.aft) {
-		case sigmoid:
-			res = 1 / (1 + pow(M_E, -arg));
-			break;
-		case ReLU:
-			res = arg < 0 ? 0 : arg;
-			break;
-	}
-
-	return res;
-}
-*/
 double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
@@ -140,6 +90,13 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 	// for sigmoid it is simple, but for other function must change
 	return derivativeOfLastActivation(neuron, resIndex);
 }*/
+
+struct Neuron {
+	int layer;
+	int index;
+	int weightsCount;
+	enum ActivationFunctionType aft;
+};
 
 struct NeuralNetwork {
 	struct Neuron *net;
@@ -352,302 +309,103 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	for(int i = 0; i < nn.inputLayerNeuronsCount; i++) {
 		nn.resData[resIndexShift + i] = inputs[i];
 	}
-/*
-	// Process first hidden layer separately for performance.
-	int i = nn.inputLayerNeuronsCount;
-	for(; i < nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer; i++) {
-		struct Neuron n = nn.net[i];
-		double *prevLayerRes = nn.resData + resIndexShift;
-		double res = activation(n, prevLayerRes, n.weightsCount);
 
-		nn.resData[resIndexShift + i] = res;
-	}
-	// From second hidden layer till the end.
-	for(; i < nn.neuronsCount; i++) {
-		struct Neuron n = nn.net[i];
-
-		int previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (n.layer - 2);
-		double *prevLayerRes = nn.resData + resIndexShift + previousLayerFirstIndex;
-		double res = activation(n, prevLayerRes, n.weightsCount);
-
-		nn.resData[resIndexShift + i] = res;
-	}
-*/
 	// First hidden layer.
 	double *weights = nn.weights;
 	double *bias = nn.bias;
 	double *prevLayerRes = nn.resData + resIndexShift;
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
-/*
-	// Threading first crude attempt. Slower than one thread. Clearly contain some error, that causes calculation mistakes in rare cases, but didn't found for now.
-	int threadNumber = 2;
-	pthread_t threads[2];
-	int neuronsPerThread = nn.neuronsPerHiddenLayer / threadNumber;
-	int lastThreadNeurons = nn.neuronsPerHiddenLayer % threadNumber;
-	// To not go beyound threadNumber, add rest of neurons to the last operation.
-	if(lastThreadNeurons > 0) lastThreadNeurons += neuronsPerThread;
-	for(int threadId = 0; threadId < threadNumber; threadId++) {
-		pthread_t thread;
-		struct ProcessActivationData data;
-		data.weightsNumber = nn.inputLayerNeuronsCount;
-		data.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-		data.prevLayerResults = prevLayerRes;
-		data.weights = weights + threadId * neuronsPerThread * nn.inputLayerNeuronsCount;
-		data.bias = bias + threadId * neuronsPerThread;
-		data.resData = resData + threadId * neuronsPerThread;
-		if(threadId == threadNumber - 1 && lastThreadNeurons > 0) {
-			data.neuronsCount = lastThreadNeurons;
-		} else {
-			data.neuronsCount = neuronsPerThread;
+
+	if(useThreading) {
+		// More readable threading version.
+		struct ProcessActivationData data1, data2, data3;
+		for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
+			int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
+			enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
+			int neuronsCount = layer == nn.hiddenLayersCount ? nn.outputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
+	
+			data1.weightsNumber = weightsNumber;
+			data1.aft = aft;
+			data1.prevLayerResults = prevLayerRes;
+			data1.weights = weights;
+			data1.bias = bias;
+			data1.resData = resData;
+			data1.neuronsCount = neuronsCount / 4;
+		
+			data2.weightsNumber = weightsNumber;
+			data2.aft = aft;
+			data2.prevLayerResults = prevLayerRes;
+			data2.weights = weights + data1.neuronsCount * weightsNumber;
+			data2.bias = bias + data1.neuronsCount;
+			data2.resData = resData + data1.neuronsCount;
+			data2.neuronsCount = data1.neuronsCount;
+		
+			data3.weightsNumber = weightsNumber;
+			data3.aft = aft;
+			data3.prevLayerResults = prevLayerRes;
+			data3.weights = weights + 2 * data1.neuronsCount * weightsNumber;
+			data3.bias = bias + 2 * data1.neuronsCount;
+			data3.resData = resData + 2 * data1.neuronsCount;
+			data3.neuronsCount = data1.neuronsCount;
+		
+			int previousNeurons = 3 * data1.neuronsCount;
+			weights += previousNeurons * weightsNumber;
+			bias += previousNeurons;
+			resData += previousNeurons;
+		
+			pad1 = &data1;
+			pad2 = &data2;
+			pad3 = &data3;
+	
+			for(int i = previousNeurons; i < neuronsCount; i++) {
+				double propagation = dotProduct(weights, prevLayerRes, weightsNumber);
+				propagation += *bias;
+				weights += weightsNumber;
+				bias++;
+				*resData = activation(propagation, aft);
+				resData++;
+			}
+			sem_wait(&sem1);
+			sem_wait(&sem2);
+			sem_wait(&sem3);
+	
+			prevLayerRes += weightsNumber;
 		}
-		pthread_create(&threads[threadId], NULL, processActivation, &data);
-	}
-	for(int threadId = 0; threadId < threadNumber; threadId ++) {
-		pthread_join(threads[threadId], NULL);
-	}
-
-	weights += nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer;
-	bias += nn.neuronsPerHiddenLayer;
-	resData += nn.neuronsPerHiddenLayer;
-*/
-/*
-	// Threading second version - work significantly faster, than one thread, didn't notice rare errors, like in previous version.
-	struct ProcessActivationData data1, data2, data3;
-	data1.weightsNumber = nn.inputLayerNeuronsCount;
-	data1.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-	data1.prevLayerResults = prevLayerRes;
-	data1.weights = weights;
-	data1.bias = bias;
-	data1.resData = resData;
-	data1.neuronsCount = nn.neuronsPerHiddenLayer / 4;
-
-	data2.weightsNumber = nn.inputLayerNeuronsCount;
-	data2.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-	data2.prevLayerResults = prevLayerRes;
-	data2.weights = weights + data1.neuronsCount * nn.inputLayerNeuronsCount;
-	data2.bias = bias + data1.neuronsCount;
-	data2.resData = resData + data1.neuronsCount;
-	data2.neuronsCount = data1.neuronsCount;
-
-	data3.weightsNumber = nn.inputLayerNeuronsCount;
-	data3.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-	data3.prevLayerResults = prevLayerRes;
-	data3.weights = weights + 2 * data1.neuronsCount * nn.inputLayerNeuronsCount;
-	data3.bias = bias + 2 * data1.neuronsCount;
-	data3.resData = resData + 2 * data1.neuronsCount;
-	data3.neuronsCount = data1.neuronsCount;
-
-	int previousNeurons = 3 * data1.neuronsCount;
-	weights += nn.inputLayerNeuronsCount * previousNeurons;
-	bias += previousNeurons;
-	resData += previousNeurons;
-
-	pad1 = &data1;
-	pad2 = &data2;
-	pad3 = &data3;
-
-	for(int i = previousNeurons; i < nn.neuronsPerHiddenLayer; i++) {
-		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
-		propagation += *bias;
-		weights += nn.inputLayerNeuronsCount;
-		bias++;
-		*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
-		resData++;
-	}
-
-	sem_wait(&sem1);
-	sem_wait(&sem2);
-	sem_wait(&sem3);
-
-	// Other hidden layers
-	prevLayerRes += nn.inputLayerNeuronsCount;
-	for(int layer = 1; layer < nn.hiddenLayersCount; layer++) {
-		data1.weightsNumber = nn.neuronsPerHiddenLayer;
-		data1.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-		data1.prevLayerResults = prevLayerRes;
-		data1.weights = weights;
-		data1.bias = bias;
-		data1.resData = resData;
-		data1.neuronsCount = nn.neuronsPerHiddenLayer / 4;
-	
-		data2.weightsNumber = nn.neuronsPerHiddenLayer;
-		data2.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-		data2.prevLayerResults = prevLayerRes;
-		data2.weights = weights + data1.neuronsCount * nn.neuronsPerHiddenLayer;
-		data2.bias = bias + data1.neuronsCount;
-		data2.resData = resData + data1.neuronsCount;
-		data2.neuronsCount = data1.neuronsCount;
-	
-		data3.weightsNumber = nn.neuronsPerHiddenLayer;
-		data3.aft = nn.net[nn.inputLayerNeuronsCount].aft;
-		data3.prevLayerResults = prevLayerRes;
-		data3.weights = weights + 2 * data1.neuronsCount * nn.neuronsPerHiddenLayer;
-		data3.bias = bias + 2 * data1.neuronsCount;
-		data3.resData = resData + 2 * data1.neuronsCount;
-		data3.neuronsCount = data1.neuronsCount;
-	
-		previousNeurons = 3 * data1.neuronsCount;
-		weights += nn.neuronsPerHiddenLayer * previousNeurons;
-		bias += previousNeurons;
-		resData += previousNeurons;
-	
-		pad1 = &data1;
-		pad2 = &data2;
-		pad3 = &data3;
-
-		for(int i = previousNeurons; i < nn.neuronsPerHiddenLayer; i++) {
-			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-			propagation += *bias;
-			weights += nn.neuronsPerHiddenLayer;
-			bias++;
-			*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
-			resData++;
-		}
-		sem_wait(&sem1);
-		sem_wait(&sem2);
-		sem_wait(&sem3);
-
-		prevLayerRes += nn.neuronsPerHiddenLayer;
-	}
-
-	// Output layer.
-	data1.weightsNumber = nn.neuronsPerHiddenLayer;
-	data1.aft = nn.net[nn.neuronsCount - 1].aft;
-	data1.prevLayerResults = prevLayerRes;
-	data1.weights = weights;
-	data1.bias = bias;
-	data1.resData = resData;
-	data1.neuronsCount = nn.outputLayerNeuronsCount / 4;
-
-	data2.weightsNumber = nn.neuronsPerHiddenLayer;
-	data2.aft = nn.net[nn.neuronsCount - 1].aft;
-	data2.prevLayerResults = prevLayerRes;
-	data2.weights = weights + data1.neuronsCount * nn.neuronsPerHiddenLayer;
-	data2.bias = bias + data1.neuronsCount;
-	data2.resData = resData + data1.neuronsCount;
-	data2.neuronsCount = data1.neuronsCount;
-
-	data3.weightsNumber = nn.neuronsPerHiddenLayer;
-	data3.aft = nn.net[nn.neuronsCount - 1].aft;
-	data3.prevLayerResults = prevLayerRes;
-	data3.weights = weights + 2 * data1.neuronsCount * nn.neuronsPerHiddenLayer;
-	data3.bias = bias + 2 * data1.neuronsCount;
-	data3.resData = resData + 2 * data1.neuronsCount;
-	data3.neuronsCount = data1.neuronsCount;
-
-	previousNeurons = 3 * data1.neuronsCount;
-	weights += nn.neuronsPerHiddenLayer * previousNeurons;
-	bias += previousNeurons;
-	resData += previousNeurons;
-
-	pad1 = &data1;
-	pad2 = &data2;
-	pad3 = &data3;
-
-	for(int i = previousNeurons; i < nn.outputLayerNeuronsCount; i++) {
-		double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-		propagation += *bias;
-		weights += nn.neuronsPerHiddenLayer;
-		bias++;
-		*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
-		resData++;
-	}
-
-	sem_wait(&sem1);
-	sem_wait(&sem2);
-	sem_wait(&sem3);
-*/
-
-	// More readable threading version.
-	struct ProcessActivationData data1, data2, data3;
-	for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
-		int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
-		enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
-		int neuronsCount = layer == nn.hiddenLayersCount ? nn.outputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
-
-		data1.weightsNumber = weightsNumber;
-		data1.aft = aft;
-		data1.prevLayerResults = prevLayerRes;
-		data1.weights = weights;
-		data1.bias = bias;
-		data1.resData = resData;
-		data1.neuronsCount = neuronsCount / 4;
-	
-		data2.weightsNumber = weightsNumber;
-		data2.aft = aft;
-		data2.prevLayerResults = prevLayerRes;
-		data2.weights = weights + data1.neuronsCount * weightsNumber;
-		data2.bias = bias + data1.neuronsCount;
-		data2.resData = resData + data1.neuronsCount;
-		data2.neuronsCount = data1.neuronsCount;
-	
-		data3.weightsNumber = weightsNumber;
-		data3.aft = aft;
-		data3.prevLayerResults = prevLayerRes;
-		data3.weights = weights + 2 * data1.neuronsCount * weightsNumber;
-		data3.bias = bias + 2 * data1.neuronsCount;
-		data3.resData = resData + 2 * data1.neuronsCount;
-		data3.neuronsCount = data1.neuronsCount;
-	
-		int previousNeurons = 3 * data1.neuronsCount;
-		weights += previousNeurons * weightsNumber;
-		bias += previousNeurons;
-		resData += previousNeurons;
-	
-		pad1 = &data1;
-		pad2 = &data2;
-		pad3 = &data3;
-
-		for(int i = previousNeurons; i < neuronsCount; i++) {
-			double propagation = dotProduct(weights, prevLayerRes, weightsNumber);
-			propagation += *bias;
-			weights += weightsNumber;
-			bias++;
-			*resData = activation(propagation, aft);
-			resData++;
-		}
-		sem_wait(&sem1);
-		sem_wait(&sem2);
-		sem_wait(&sem3);
-
-		prevLayerRes += weightsNumber;
-	}
-
-/*
-	// One thread.
-	for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
-		double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
-		propagation += *bias;
-		weights += nn.inputLayerNeuronsCount;
-		bias++;
-		*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
-		resData++;
-	}
-
-	// Other hidden layers
-	prevLayerRes += nn.inputLayerNeuronsCount;
-	for(int layer = 1; layer < nn.hiddenLayersCount; layer ++) {
+	} else {
+		// One thread.
 		for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
-			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+			double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
 			propagation += *bias;
-			weights += nn.neuronsPerHiddenLayer;
+			weights += nn.inputLayerNeuronsCount;
 			bias++;
 			*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
 			resData++;
 		}
-		prevLayerRes += nn.neuronsPerHiddenLayer;
+	
+		// Other hidden layers
+		prevLayerRes += nn.inputLayerNeuronsCount;
+		for(int layer = 1; layer < nn.hiddenLayersCount; layer ++) {
+			for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
+				double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+				propagation += *bias;
+				weights += nn.neuronsPerHiddenLayer;
+				bias++;
+				*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
+				resData++;
+			}
+			prevLayerRes += nn.neuronsPerHiddenLayer;
+		}
+	
+		// Output layer.
+		for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+			propagation += *bias;
+			weights += nn.neuronsPerHiddenLayer;
+			bias++;
+			*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
+			resData++;
+		}
 	}
-
-	// Output layer.
-	for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
-		double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-		propagation += *bias;
-		weights += nn.neuronsPerHiddenLayer;
-		bias++;
-		*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
-		resData++;
-	}
-*/
 }
 
 // for small networks only and one result
@@ -943,9 +701,13 @@ void startThreading() {
 	pthread_create(&thread2, &attr, processActivationQueue2, NULL);
 	pthread_create(&thread3, &attr, processActivationQueue3, NULL);
 	pthread_attr_destroy(&attr);
+
+	useThreading = true;
 }
 
 void stopThreading() {
+	useThreading = false;
+
 	pthread_cancel(thread1);
 	pthread_cancel(thread2);
 	pthread_cancel(thread3);
@@ -967,8 +729,6 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycl
 
 // train by one sample at the time, cycling all of them
 void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
-	startThreading();
-
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	printf("\nindexes for shuffle created\n");
@@ -1014,14 +774,10 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 	free(output);
 		
 	free(indexes);
-
-	stopThreading();
 }
 
 // train by all samples at once 
 void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
-	startThreading();
-
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
 	for(int c = 0; c < maxCycles; c++) {
@@ -1043,7 +799,6 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 		if(cost < costFunctionToStop) {
 			free(input);
 			free(output);
-			stopThreading();
 			return;
 		}
 
@@ -1051,14 +806,10 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	}
 	free(input);
 	free(output);
-
-	stopThreading();
 }
 
 // train by small batch of samples at once, reshuffling after all batches was processed in current cycle
 void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles, int batchSize, double (*mnistCorrectness)()) {
-	startThreading();
-
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -1120,7 +871,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 			free(batchOutputs);
 			free(input);
 			free(output);
-			stopThreading();
 			return;
 		}
 	}
@@ -1129,7 +879,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	free(input);
 	free(output);
 	free(indexes);
-	stopThreading();
 }
 
 void testXOR() {
@@ -1165,12 +914,8 @@ void testXOR() {
 				0
 	};
 	trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
 
 	printf("\ntest xor:\n");
-
-	startThreading();
 
 	calculate(*nn, inputs, 0);
 	printNetwork(*nn);
@@ -1188,8 +933,6 @@ void testXOR() {
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
 	printNetworkInFile(*nn);
-
-	stopThreading();
 
 	destroyNetwork(&nn);
 }
@@ -1226,13 +969,9 @@ void testOR() {
 				1,
 				0
 	};
-	//trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
 	trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
 
 	printf("\ntest or:\n");
-
-	startThreading();
 
 	calculate(*nn, inputs, 0);
 	printNetwork(*nn);
@@ -1249,8 +988,6 @@ void testOR() {
 	calculate(*nn, inputs3, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
-
-	stopThreading();
 
 	destroyNetwork(&nn);
 }
@@ -1287,13 +1024,9 @@ void testAND() {
 				0,
 				0
 	};
-	//trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-	//trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
 	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
 
 	printf("\ntest and:\n");
-
-	startThreading();
 
 	calculate(*nn, inputs, 0);
 	printNetwork(*nn);
@@ -1310,8 +1043,6 @@ void testAND() {
 	calculate(*nn, inputs3, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
-
-	stopThreading();
 
 	destroyNetwork(&nn);
 }
@@ -1492,10 +1223,7 @@ void testMNIST() {
 	globalValMNISTOutputs = mnistTestLabels.data;
 	globalValMNISTExamplesQuantity = mnistTestImages.count;
 
-	//trainByGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles);
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles, trainBlockSize, testNetworkByMNISTDataForFunctionParam);
-
-	//testNetworkByMNISTData(*nn, inputsTest, outputsTest, mnistTestImages.count);
 
 	free(inputs);
 	free(outputs);
@@ -1512,11 +1240,15 @@ int main() {
 
 	setupLogs();
 
+	startThreading();
+
 	//testXOR();
 	//testOR();
 	//testAND();
 
 	testMNIST();
+
+	stopThreading();
 
 	closeLogs();
 
