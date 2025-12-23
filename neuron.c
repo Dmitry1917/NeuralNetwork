@@ -15,6 +15,7 @@ bool useThreading = false;
 void setupLogs() {
 	//logsFile = fopen("logs.txt", "w");
 	//logsFile = fopen("/dev/null", "w");
+	//logsFile = stdout;
 }
 
 void closeLogs() {
@@ -67,6 +68,11 @@ enum ActivationFunctionType {
 	ReLU
 };
 
+enum CostFunctionType {
+	square,
+	crossEntropy// Only use with sigmoid output layer.
+};
+
 double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
@@ -105,6 +111,7 @@ struct NeuralNetwork {
 	int outputLayerNeuronsCount;
 	int hiddenLayersCount;
 	int neuronsPerHiddenLayer;
+	enum CostFunctionType cft;
 	int trainBlockSize;
 	int lastLayerFirstIndex;
 	double *lastCosts;
@@ -115,7 +122,7 @@ struct NeuralNetwork {
 	double *bias;
 };
 
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aft) {
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft) {
 	int neuronsCount = inputLayerNeuronsCount + outputLayerNeuronsCount + hiddenLayersCount * neuronsPerHiddenLayer;
 	struct NeuralNetwork *nn = malloc(sizeof(struct NeuralNetwork));
 
@@ -126,6 +133,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->neuronsPerHiddenLayer = neuronsPerHiddenLayer;
 	nn->trainBlockSize = trainBlockSize;
 	nn->lastLayerFirstIndex = neuronsCount - outputLayerNeuronsCount;
+	nn->cft = cft;
 
 	nn->net = calloc(neuronsCount, sizeof(struct Neuron));
 	nn->lastCosts = calloc(trainBlockSize, sizeof(double));
@@ -141,7 +149,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		nn->net[i].layer = 0;
 		nn->net[i].index = i;
 		nn->net[i].weightsCount = 1;
-		nn->net[i].aft = aft;
+		nn->net[i].aft = sigmoid;
 	}
 
 	int weightIndex = 0;
@@ -166,7 +174,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			}
 			double bias = randomf(-2, 2);
 			nn->bias[il - inputLayerNeuronsCount] = bias;
-			nn->net[il].aft = aft;
+			nn->net[il].aft = aftHidden;
 		}
 	}
 
@@ -183,7 +191,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		}
 		double bias = randomf(-2, 2);
 		nn->bias[il - inputLayerNeuronsCount] = bias;
-		nn->net[il].aft = aft;
+		nn->net[il].aft = aftOutput;
 	}
 
 	return nn;
@@ -213,21 +221,6 @@ struct ProcessActivationData {
 sem_t sem1, sem2, sem3;
 pthread_t thread1, thread2, thread3;
 struct ProcessActivationData *pad1, *pad2, *pad3;
-
-void* processActivation(void *pad) {
-	struct ProcessActivationData *data = (struct ProcessActivationData *)pad;
-	double *weights = data->weights;
-	double *bias = data->bias;
-	double *resData = data->resData;
-	for(int i = 0; i < data->neuronsCount; i++) {
-		double propagation = dotProduct(weights, data->prevLayerResults, data->weightsNumber);
-		propagation += *bias;
-		weights += data->weightsNumber;
-		bias++;
-		*resData = activation(propagation, data->aft);
-		resData++;
-	}
-}
 
 void *processActivationQueue1(void *args) {
 	int prevType;
@@ -486,7 +479,6 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 	int i = 0;
 	while(level < maxLevel) {
 		struct Neuron n = nn.net[i];
-		char neuronInfo[30];
 		if(n.layer == 0) {
 			fprintf(logsFile, "\nneuron ");
 			for(int r = 0; r < nn.trainBlockSize; r++) {
@@ -538,6 +530,7 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 	}
 }
 
+#define nanPreventionLimit 0.001
 // cost function
 double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samplesCount, FILE *logsOutput) {
 	/*if(samplesCount < 1) {
@@ -547,14 +540,35 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 	// calculate cost function as 1/2 * sum(errorPerOutputNeuron^2)
 	double cost = 0;
 
-	for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
-		double sampleCost = 0;
-		for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
-			sampleCost += pow(nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i] - desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i], 2);
-		}
-		sampleCost *= 0.5;
-		nn.lastCosts[resIndex] = sampleCost;
-		cost += sampleCost;
+	switch(nn.cft) {
+		case square:
+			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
+				double sampleCost = 0;
+				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+					sampleCost += pow(nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i] - desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i], 2);
+				}
+				sampleCost *= 0.5;
+				nn.lastCosts[resIndex] = sampleCost;
+				cost += sampleCost;
+			}
+			break;
+		case crossEntropy:
+			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
+				double sampleCost = 0;
+				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+					// Intentionaly written very detailed for easier understanding. Performance here isn't noticably affected.
+					double desired = desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i];
+					double real = nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i];
+					double realSubtracted = 1 - real;
+					// Without such check can sometimes get nan, because of float rounding leading to zero in logarithm.
+					if(real < nanPreventionLimit) real = nanPreventionLimit;
+					if(realSubtracted < nanPreventionLimit) realSubtracted = nanPreventionLimit;
+					sampleCost += -(desired * log(real) + (1 - desired) * log(realSubtracted));
+				}
+				nn.lastCosts[resIndex] = sampleCost;
+				cost += sampleCost;
+			}
+			break;
 	}
 	cost /= samplesCount;
 
@@ -598,15 +612,28 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 	int i = nn.neuronsCount - 1;
 	int resIndexShift = nn.neuronsCount * resIndex;
 
-	// Last layer process separately for a bit of performance.
-	for(; i >= nn.lastLayerFirstIndex; i--) {
-		struct Neuron *n = &(nn.net[i]);
-		double lastRes = nn.resData[resIndexShift + i]; 
-
-		double dErrorBydSigma = lastRes - results[i - nn.lastLayerFirstIndex];
-		double lastActivationDerivative = derivativeOfLastActivation(lastRes, n->aft);
-		double delta = lastActivationDerivative * dErrorBydSigma;
-		nn.deltasData[resIndexShift + i] = delta;
+	// Last layer process separately for a bit of performance. And later for cross entropy implementation.
+	switch(nn.cft) {
+		case square:
+			for(; i >= nn.lastLayerFirstIndex; i--) {
+				struct Neuron *n = &(nn.net[i]);
+				double lastRes = nn.resData[resIndexShift + i]; 
+		
+				double dErrorBydSigma = lastRes - results[i - nn.lastLayerFirstIndex];
+				double lastActivationDerivative = derivativeOfLastActivation(lastRes, n->aft);
+				double delta = lastActivationDerivative * dErrorBydSigma;
+				nn.deltasData[resIndexShift + i] = delta;
+			}
+			break;
+		case crossEntropy:
+			for(; i >= nn.lastLayerFirstIndex; i--) {
+				struct Neuron *n = &(nn.net[i]);
+				double lastRes = nn.resData[resIndexShift + i]; 
+		
+				double delta = lastRes - results[i - nn.lastLayerFirstIndex];
+				nn.deltasData[resIndexShift + i] = delta;
+			}
+			break;
 	}
 
 	// Start with last weight, to go backwards during calculations, using next layer neurons.
@@ -649,13 +676,30 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	/*if(trainBlockSize < 1) {
 		fprintf(stderr, "\ntrain size < 1\n");
 	}*/
+	//TODO It must be possible to use different learning rates for different layers, but in more readable way.
 	double trainKoeff;
-	switch(nn.net[0].aft) {
+	double outputLayerTrainKoeff;
+	switch(nn.net[nn.inputLayerNeuronsCount].aft) {
 		case sigmoid:
 			trainKoeff = 2.8;
 			break;
 		case ReLU:
-			trainKoeff = 0.09;
+			trainKoeff = 0.01;
+			break;
+	}
+	switch(nn.net[nn.lastLayerFirstIndex].aft) {
+		case sigmoid:
+			switch(nn.cft) {
+				case square:
+					outputLayerTrainKoeff = 2.8;
+					break;
+				case crossEntropy:
+					outputLayerTrainKoeff =  0.5;
+					break;
+			}
+			break;
+		case ReLU:
+			outputLayerTrainKoeff = 0.01;
 			break;
 	}
 	double trainBlockCoeff = 1.0 / trainBlockSize;
@@ -682,8 +726,13 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 			}
 			*bias -= trainKoeff * sumOfDeltas * trainBlockCoeff;
 		}
+
+		// Set info for next layer, therefore do it in the layer before last for neurons count;
 		previousLayerNeuronsCount = currentLayerNeuronsCount;
-		if(layer == nn.hiddenLayersCount) currentLayerNeuronsCount = nn.outputLayerNeuronsCount;
+		if(layer == nn.hiddenLayersCount) {
+			currentLayerNeuronsCount = nn.outputLayerNeuronsCount;
+			trainKoeff = outputLayerTrainKoeff;
+		}
 		previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (layer - 1);
 	}
 }
@@ -738,7 +787,7 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 	printf("\nindexes set\n");
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
-			
+
 	for(int c = 0; c < maxCycles; c++) {
 		printf("\ngroup train cycle %d", c);
 		fprintf(logsFile, "\ngroup train cycle %d", c);
@@ -886,7 +935,7 @@ void testXOR() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -942,7 +991,7 @@ void testOR() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -997,7 +1046,7 @@ void testAND() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1212,7 +1261,7 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, square);
 	printf("\nnetwork created\n");
 
 	double costFuncToStop = 0.02;
