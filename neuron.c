@@ -63,14 +63,17 @@ double dotProduct(double *array1, double* array2, int count) {
 	return res;
 }
 
+// TODO Make better ways for combinations of cost functions and activation ones, to prevent accidently set incompatibles.
 enum ActivationFunctionType {
 	sigmoid,
-	ReLU
+	ReLU,
+	softmax
 };
 
 enum CostFunctionType {
 	square,
-	crossEntropy// Only use with sigmoid output layer.
+	crossEntropy,// Only use with sigmoid output layer.
+	logLikehood// Only use with softmax output layer.
 };
 
 double activation(double propagation, enum ActivationFunctionType aft) {
@@ -79,6 +82,9 @@ double activation(double propagation, enum ActivationFunctionType aft) {
 			return 1 / (1 + exp(-propagation));
 		case ReLU:
 			return propagation < 0 ? 0 : propagation;
+		case softmax:
+			printf("\nNot supposed use softmax here.\n");
+			exit(1);
 	}
 }
 
@@ -88,6 +94,10 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 			return lastRes * (1 - lastRes);
 		case ReLU:
 			return lastRes <= 0 ? 0 : 1;
+		case softmax:
+			printf("\nNot supposed use softmax here.\n");
+			exit(1);
+
 	}
 }
 
@@ -123,6 +133,12 @@ struct NeuralNetwork {
 };
 
 struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft) {
+	// Softmax can be only in the last layer.
+	if(aftHidden == softmax) {
+		printf("\nSoftmax can be only in the last layer.\n");
+		exit(1);
+	}
+
 	int neuronsCount = inputLayerNeuronsCount + outputLayerNeuronsCount + hiddenLayersCount * neuronsPerHiddenLayer;
 	struct NeuralNetwork *nn = malloc(sizeof(struct NeuralNetwork));
 
@@ -309,14 +325,16 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	double *prevLayerRes = nn.resData + resIndexShift;
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
 
-	if(useThreading) {
-		// More readable threading version.
-		struct ProcessActivationData data1, data2, data3;
-		for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
-			int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
-			enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
-			int neuronsCount = layer == nn.hiddenLayersCount ? nn.outputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
-	
+	struct ProcessActivationData data1, data2, data3;
+	for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
+		int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
+		enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
+		int neuronsCount = layer == nn.hiddenLayersCount ? nn.outputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
+
+		int previousNeurons = 0;
+		bool useThreadingForThisLayer = useThreading && aft != softmax;
+
+		if(useThreadingForThisLayer) {
 			data1.weightsNumber = weightsNumber;
 			data1.aft = aft;
 			data1.prevLayerResults = prevLayerRes;
@@ -341,7 +359,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			data3.resData = resData + 2 * data1.neuronsCount;
 			data3.neuronsCount = data1.neuronsCount;
 		
-			int previousNeurons = 3 * data1.neuronsCount;
+			previousNeurons = 3 * data1.neuronsCount;
 			weights += previousNeurons * weightsNumber;
 			bias += previousNeurons;
 			resData += previousNeurons;
@@ -349,7 +367,25 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			pad1 = &data1;
 			pad2 = &data2;
 			pad3 = &data3;
-	
+		}
+		if(aft == softmax) {
+			double *exponents = malloc(nn.outputLayerNeuronsCount * sizeof(double));
+			double expSum = 0;
+			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+				double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
+				propagation += *bias;
+				double exponent = exp(propagation);
+				exponents[i] = exponent;
+				expSum += exponent;
+				weights += nn.neuronsPerHiddenLayer;
+				bias++;
+			}
+			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+				*resData = exponents[i] / expSum;
+				resData++;
+			}
+			free(exponents);
+		} else {
 			for(int i = previousNeurons; i < neuronsCount; i++) {
 				double propagation = dotProduct(weights, prevLayerRes, weightsNumber);
 				propagation += *bias;
@@ -358,46 +394,14 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 				*resData = activation(propagation, aft);
 				resData++;
 			}
+		}
+
+		if(useThreadingForThisLayer) {
 			sem_wait(&sem1);
 			sem_wait(&sem2);
 			sem_wait(&sem3);
-	
-			prevLayerRes += weightsNumber;
 		}
-	} else {
-		// One thread.
-		for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
-			double propagation = dotProduct(weights, prevLayerRes, nn.inputLayerNeuronsCount);
-			propagation += *bias;
-			weights += nn.inputLayerNeuronsCount;
-			bias++;
-			*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
-			resData++;
-		}
-	
-		// Other hidden layers
-		prevLayerRes += nn.inputLayerNeuronsCount;
-		for(int layer = 1; layer < nn.hiddenLayersCount; layer ++) {
-			for(int i = 0; i < nn.neuronsPerHiddenLayer; i++) {
-				double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-				propagation += *bias;
-				weights += nn.neuronsPerHiddenLayer;
-				bias++;
-				*resData = activation(propagation, nn.net[nn.inputLayerNeuronsCount + i].aft);
-				resData++;
-			}
-			prevLayerRes += nn.neuronsPerHiddenLayer;
-		}
-	
-		// Output layer.
-		for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
-			double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-			propagation += *bias;
-			weights += nn.neuronsPerHiddenLayer;
-			bias++;
-			*resData = activation(propagation, nn.net[nn.neuronsCount - 1].aft);
-			resData++;
-		}
+		prevLayerRes += weightsNumber;
 	}
 }
 
@@ -569,6 +573,27 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 				cost += sampleCost;
 			}
 			break;
+		case logLikehood:
+			// This can be used only with activation functions, that lead to final results resemble probability distribution and desired results being 0 and 1 only.
+			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
+				double sampleCost = 0;
+				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
+					double desired = desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i];
+					// Prevent floating point comparison issues again.
+					if(desired > 0.999) {
+						double real = nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i];
+						sampleCost = -log(real);
+						break;
+					}
+					if(i == nn.outputLayerNeuronsCount - 1) {
+						printf("\nNot supposed to come here - desired results must have 1 if correct.\n");
+						exit(1);
+					}
+				}
+				nn.lastCosts[resIndex] = sampleCost;
+				cost += sampleCost;
+			}
+			break;
 	}
 	cost /= samplesCount;
 
@@ -626,6 +651,7 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 			}
 			break;
 		case crossEntropy:
+		case logLikehood:
 			for(; i >= nn.lastLayerFirstIndex; i--) {
 				struct Neuron *n = &(nn.net[i]);
 				double lastRes = nn.resData[resIndexShift + i]; 
@@ -701,6 +727,8 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 		case ReLU:
 			outputLayerTrainKoeff = 0.01;
 			break;
+		case softmax:
+			outputLayerTrainKoeff = 0.05;
 	}
 	double trainBlockCoeff = 1.0 / trainBlockSize;
 
@@ -1261,7 +1289,7 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, square);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy);
 	printf("\nnetwork created\n");
 
 	double costFuncToStop = 0.02;
