@@ -26,12 +26,26 @@ int sign(int x) {
 	return (x > 0) - (x < 0);
 }
 
-double randomf(double from, double to) {
+double randomUniform(double from, double to) {
 	double interval = to - from;
 	assert(interval > 0);
 	int rand = random();
 	double fraction = (double)rand / RAND_MAX;
 	return from + fraction * interval;
+}
+
+double randomUniformForBoxMullerMethod() {// Return value in (0;1] semiopen interval.
+	return ((double)random() + 1.0) / (RAND_MAX + 1.0);
+}
+
+double randomGauss01() {
+	double r1 = randomUniformForBoxMullerMethod();
+	double r2 = randomUniformForBoxMullerMethod();
+	return sqrt(-2.0 * log(r1)) * cos(2 * M_PI * r2);
+}
+
+double randomGauss(double mean, double deviation) {
+	return randomGauss01() * deviation + mean;
 }
 
 void shuffle(int* array, int length) {
@@ -190,12 +204,15 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			}
 			
 			nn->net[il].weightsCount = previousLayerNeuronsCount;
+			double deviation = 1.0 / previousLayerNeuronsCount;
 			for(int k = 0; k < previousLayerNeuronsCount; k++) {
-				double w = randomf(-1, 1);
+				double w = randomGauss(0, deviation);
+				//double w = randomUniform(-1, 1);
 				nn->weights[weightIndex] = w;
 				weightIndex++;
 			}
-			double bias = randomf(-2, 2);
+			double bias = randomGauss(0, 1);
+			//double bias = randomUniform(0, 1);
 			nn->bias[il - inputLayerNeuronsCount] = bias;
 			nn->net[il].aft = aftHidden;
 		}
@@ -207,12 +224,15 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		nn->net[il].layer = 1 + hiddenLayersCount;
 		nn->net[il].index = i;
 		nn->net[il].weightsCount = neuronsPerHiddenLayer;
+		double deviation = 1.0 / neuronsPerHiddenLayer;
 		for(int k = 0; k < neuronsPerHiddenLayer; k++) {
-			double w = randomf(-1, 1);
+			double w = randomGauss(0, deviation);
+			//double w = randomUniform(-1, 1);
 			nn->weights[weightIndex] = w;
 			weightIndex++;
 		}
-		double bias = randomf(-2, 2);
+		double bias = randomGauss(0, 1);
+		//double bias = randomUniform(0, 1);
 		nn->bias[il - inputLayerNeuronsCount] = bias;
 		nn->net[il].aft = aftOutput;
 	}
@@ -603,7 +623,6 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			break;
 	}
 	if(nn.l2RegularizationParameter > 0) {
-		// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended.
 		int weightsCount = nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount;
 		double weightsSquaresSum = 0;
 		double *weights = nn.weights;
@@ -613,6 +632,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 		}
 		cost += nn.l2RegularizationParameter * weightsSquaresSum * 0.5;
 	}
+	// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended. To be completely fair - if total samples amount is not divisible on mini batch size, then there will be some error, but in all real cases (many samples, limited mini batch) it will be minor and inconsequential, because cost is used only for some control, not in calculations themselfs.
 	cost /= samplesCount;
 
 	if(logsOutput != NULL) {
@@ -1281,7 +1301,7 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.1);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5);
 	printf("\nnetwork created\n");
 
 	double costFuncToStop = 0.02;
