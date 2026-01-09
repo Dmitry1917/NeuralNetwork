@@ -204,7 +204,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			}
 			
 			nn->net[il].weightsCount = previousLayerNeuronsCount;
-			double deviation = 1.0 / previousLayerNeuronsCount;
+			double deviation = 1.0 / sqrt(previousLayerNeuronsCount);
 			for(int k = 0; k < previousLayerNeuronsCount; k++) {
 				double w = randomGauss(0, deviation);
 				//double w = randomUniform(-1, 1);
@@ -224,7 +224,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		nn->net[il].layer = 1 + hiddenLayersCount;
 		nn->net[il].index = i;
 		nn->net[il].weightsCount = neuronsPerHiddenLayer;
-		double deviation = 1.0 / neuronsPerHiddenLayer;
+		double deviation = 1.0 / sqrt(neuronsPerHiddenLayer);
 		for(int k = 0; k < neuronsPerHiddenLayer; k++) {
 			double w = randomGauss(0, deviation);
 			//double w = randomUniform(-1, 1);
@@ -897,8 +897,13 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	free(output);
 }
 
+struct MNISTCheckResults {
+	double trainRes;
+	double testRes;
+};
+
 // train by small batch of samples at once, reshuffling after all batches was processed in current cycle
-void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles, int batchSize, double (*mnistCorrectness)()) {
+void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles, int batchSize, struct MNISTCheckResults (*mnistCorrectness)()) {
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -951,8 +956,8 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 		printf("\ncycle %d cost function: %f\n", c, cycleCost);
 
 		if(mnistCorrectness != NULL) {
-			double correctness = (*mnistCorrectness)();
-			printf("\ncorrectness %f\n", correctness);
+			struct MNISTCheckResults correctness = (*mnistCorrectness)();
+			printf("\ncorrectness by train data: %f, by test data: %f\n", correctness.trainRes, correctness.testRes);
 		}
 
 		if(cycleCost < costFunctionToStop) {
@@ -1148,7 +1153,7 @@ void freeMNIST(struct MNIST_Data mnist) {
 	free(mnist.data);
 }
 
-int testNetworkByMNISTData(struct NeuralNetwork nn, double *inputs, unsigned char *outputs, int examplesQuantity) {
+int testNetworkByMNISTData(struct NeuralNetwork nn, double *inputs, unsigned char *outputs, int examplesQuantity, bool isTrain) {
 	int mnistSize = 784;
 	int digits = 10;
 	double *input = malloc(mnistSize * sizeof(double));
@@ -1174,20 +1179,28 @@ int testNetworkByMNISTData(struct NeuralNetwork nn, double *inputs, unsigned cha
 		}
 		if(maxResIndex == correctResIndex) correctCounter++;
 	}
-	printf("\nmnist correct data: %d/%d\n", correctCounter, examplesQuantity);
+	printf("\nmnist correct data: %d/%d %b\n", correctCounter, examplesQuantity, isTrain);
 	free(input);
 
 	return correctCounter;
 }
 
 struct NeuralNetwork *globalValNetworkForMNISTSpecialTest;
-double *globalValMNISTInputs;
-unsigned char *globalValMNISTOutputs;
-int globalValMNISTExamplesQuantity;
 
-double testNetworkByMNISTDataForFunctionParam() {
-	int correctAmount = testNetworkByMNISTData(*globalValNetworkForMNISTSpecialTest, globalValMNISTInputs, globalValMNISTOutputs, globalValMNISTExamplesQuantity);
-	double res = ((double)correctAmount) / globalValMNISTExamplesQuantity;
+double *globalValMNISTTrainInputs;
+unsigned char *globalValMNISTTrainOutputs;
+int globalValMNISTTrainExamplesQuantity;
+
+double *globalValMNISTTestInputs;
+unsigned char *globalValMNISTTestOutputs;
+int globalValMNISTTestExamplesQuantity;
+
+struct MNISTCheckResults testNetworkByMNISTDataForFunctionParam() {
+	int correctAmountTrainData = testNetworkByMNISTData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTrainInputs, globalValMNISTTrainOutputs, globalValMNISTTrainExamplesQuantity, true);
+	int correctAmountTestData = testNetworkByMNISTData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTestInputs, globalValMNISTTestOutputs, globalValMNISTTestExamplesQuantity, false);
+	struct MNISTCheckResults res;
+	res.trainRes = ((double)correctAmountTrainData) / globalValMNISTTrainExamplesQuantity;
+	res.testRes = ((double)correctAmountTestData) / globalValMNISTTestExamplesQuantity;
 	return res;
 }
 
@@ -1308,9 +1321,13 @@ void testMNIST() {
 	int maxTrainCycles = 10;
 
 	globalValNetworkForMNISTSpecialTest = nn;
-	globalValMNISTInputs = inputsTest;
-	globalValMNISTOutputs = mnistTestLabels.data;
-	globalValMNISTExamplesQuantity = mnistTestImages.count;
+	globalValMNISTTestInputs = inputsTest;
+	globalValMNISTTestOutputs = mnistTestLabels.data;
+	globalValMNISTTestExamplesQuantity = mnistTestImages.count;
+
+	globalValMNISTTrainInputs = inputs;
+	globalValMNISTTrainOutputs = mnistTrainLabels.data;
+	globalValMNISTTrainExamplesQuantity = mnistTrainImages.count;
 
 	//nn->l2RegularizationParameter = 5.0;
 	//nn->trainSamplesTotalAmount = mnistTrainImages.count;
