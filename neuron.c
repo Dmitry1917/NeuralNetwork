@@ -140,6 +140,9 @@ struct NeuralNetwork {
 	double baseTrainCoeff;
 	double l2RegularizationParameter;
 	int trainSamplesTotalAmount;
+	int noImprovementsEpochsLimit;
+	double trainCoeffCurrentDecreaser;
+	double trainCoeffDecreaserLimit;
 	int lastLayerFirstIndex;
 	double *lastCosts;
 	// Results go like this: allResults_block1, allResults_block2 ... allResults_last
@@ -171,6 +174,9 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->baseTrainCoeff = trainCoeff;
 	nn->l2RegularizationParameter = 0;
 	nn->trainSamplesTotalAmount = 0;
+	nn->noImprovementsEpochsLimit = 0;
+	nn->trainCoeffCurrentDecreaser = 1;
+	nn->trainCoeffDecreaserLimit = 1;
 
 	nn->net = calloc(neuronsCount, sizeof(struct Neuron));
 	nn->lastCosts = calloc(trainBlockSize, sizeof(double));
@@ -630,7 +636,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			weightsSquaresSum += *weights * *weights;
 			weights++;
 		}
-		cost += nn.l2RegularizationParameter * weightsSquaresSum * 0.5;
+		cost += nn.l2RegularizationParameter * weightsSquaresSum * 0.5 / nn.trainSamplesTotalAmount;
 	}
 	// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended. To be completely fair - if total samples amount is not divisible on mini batch size, then there will be some error, but in all real cases (many samples, limited mini batch) it will be minor and inconsequential, because cost is used only for some control, not in calculations themselfs.
 	cost /= samplesCount;
@@ -740,9 +746,11 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	/*if(trainBlockSize < 1) {
 		fprintf(stderr, "\ntrain size < 1\n");
 	}*/
+	double trainCoeff = nn.baseTrainCoeff * nn.trainCoeffCurrentDecreaser;
 	double trainBlockCoeff = 1.0 / trainBlockSize;
 	double invertedSamplesNumber = 1.0;
 	if(nn.trainSamplesTotalAmount > 0) invertedSamplesNumber = 1.0 / nn.trainSamplesTotalAmount;
+	double l2RegularizationReducedByTrainBlocks = nn.l2RegularizationParameter * invertedSamplesNumber * trainBlockCoeff;
 
 	int previousLayerFirstIndex = 0;
 	int previousLayerNeuronsCount = nn.inputLayerNeuronsCount;
@@ -759,12 +767,12 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 				double *resultsOfPreviousLayer = nn.resData + trainBlockShift + previousLayerFirstIndex;//It's content is sigma in formulas.
 				double deltaReducedByTrainBlocks = nn.deltasData[trainBlockShift + neuronTotalIndex] * trainBlockCoeff;
 				for(int k = 0; k < previousLayerNeuronsCount; k++) {
-					weight[k] -= nn.baseTrainCoeff * (nn.l2RegularizationParameter * weight[k] * invertedSamplesNumber + (*resultsOfPreviousLayer) * deltaReducedByTrainBlocks);// Multiplication of last two is gradient of weight, divided by number of training blocks.
+					weight[k] -= trainCoeff * (l2RegularizationReducedByTrainBlocks * weight[k] + (*resultsOfPreviousLayer) * deltaReducedByTrainBlocks);// Multiplication of last two is gradient of weight, divided by number of training blocks.
 					resultsOfPreviousLayer++;
 				}
 				sumOfDeltas += nn.deltasData[trainBlockShift + neuronTotalIndex];
 			}
-			*bias -= nn.baseTrainCoeff * sumOfDeltas * trainBlockCoeff;
+			*bias -= trainCoeff * sumOfDeltas * trainBlockCoeff;
 		}
 
 		// Set info for next layer, therefore do it in the layer before last for neurons count;
@@ -918,6 +926,9 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	double *output = malloc(outputSize * sizeof(double));
 	double *batchOutputs = malloc(outputSize * batchSize * sizeof(double));
 
+	int lastImprovementCycle = 0;
+	double lastImprovementCorrectness = 0;
+
 	for(int c = 0; c < maxCycles; c++) {
 		//fprintf(logsFile, "\ngroup together train cycle %d", c);
 
@@ -958,6 +969,25 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 		if(mnistCorrectness != NULL) {
 			struct MNISTCheckResults correctness = (*mnistCorrectness)();
 			printf("\ncorrectness by train data: %f, by test data: %f\n", correctness.trainRes, correctness.testRes);
+			if(nn.noImprovementsEpochsLimit > 0) {
+				if(correctness.testRes > lastImprovementCorrectness) {
+					lastImprovementCorrectness = correctness.testRes;
+					lastImprovementCycle = c;
+				} else if(c - lastImprovementCycle > nn.noImprovementsEpochsLimit) {
+					if(nn.trainCoeffCurrentDecreaser > nn.trainCoeffDecreaserLimit) {
+						nn.trainCoeffCurrentDecreaser *= 0.5;
+						lastImprovementCycle = c;
+						printf("\nDecrease learning rate.\n");
+					} else {
+						printf("\nExit because of no improvements for too long.\n");
+						free(indexes);
+						free(batchOutputs);
+						free(input);
+						free(output);
+						return;
+					}
+				}
+			}
 		}
 
 		if(cycleCost < costFunctionToStop) {
@@ -1329,8 +1359,11 @@ void testMNIST() {
 	globalValMNISTTrainOutputs = mnistTrainLabels.data;
 	globalValMNISTTrainExamplesQuantity = mnistTrainImages.count;
 
-	//nn->l2RegularizationParameter = 5.0;
-	//nn->trainSamplesTotalAmount = mnistTrainImages.count;
+//	nn->l2RegularizationParameter = 5.0;
+//	nn->trainSamplesTotalAmount = mnistTrainImages.count;
+//	nn->noImprovementsEpochsLimit = 10;
+//	nn->trainCoeffDecreaserLimit = 0.0625;
+//	nn->trainCoeffCurrentDecreaser = 1.0;
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles, trainBlockSize, testNetworkByMNISTDataForFunctionParam);
 
 	free(inputs);
