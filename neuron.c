@@ -80,6 +80,7 @@ double dotProduct(double *array1, double* array2, int count) {
 // TODO Make better ways for combinations of cost functions and activation ones, to prevent accidently set incompatibles.
 enum ActivationFunctionType {
 	sigmoid,
+	tanhyp,
 	ReLU,
 	softmax
 };
@@ -94,6 +95,10 @@ double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
 			return 1 / (1 + exp(-propagation));
+		case tanhyp:
+			double eInX = exp(propagation);
+			double eInMinusX = exp(-propagation);
+			return (eInX - eInMinusX) / (eInX + eInMinusX);
 		case ReLU:
 			return propagation < 0 ? 0 : propagation;
 		case softmax:
@@ -106,6 +111,8 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 	switch(aft) {
 		case sigmoid:
 			return lastRes * (1 - lastRes);
+		case tanhyp:
+			return 1 - lastRes * lastRes;
 		case ReLU:
 			return lastRes <= 0 ? 0 : 1;
 		case softmax:
@@ -150,10 +157,12 @@ struct NeuralNetwork {
 	double *deltasData;
 	double *weights;
 	double *bias;
+	double weightsMomentum;
+	double *weightsVelocities;
 };
 
 /* All info based on MNIST tests. trainCoeff for square cft and all sigmoids is 2.8. If use crossEntropy 0.5. softmax and cft logLikehood 0.05. ReLU for hidden layers demands decrease it to 0.1 and below if its higher.*/
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double trainCoeff) {
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double trainCoeff, double weightsMomentum) {
 	// Softmax can be only in the last layer.
 	if(aftHidden == softmax) {
 		printf("\nSoftmax can be only in the last layer.\n");
@@ -183,10 +192,19 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->resData = calloc(trainBlockSize * neuronsCount, sizeof(double));
 	nn->deltasData = calloc(trainBlockSize * neuronsCount, sizeof(double));
 	// First hidden layer has number of weights equal to input layer neurons number multiplied to number of neurons in layer itself, the same logic applied to other hidden layers and output layer.
-	// WARNING it work only if hidden layers exist - percepton will fail.
-	nn->weights = malloc((inputLayerNeuronsCount * neuronsPerHiddenLayer + (hiddenLayersCount - 1) * neuronsPerHiddenLayer * neuronsPerHiddenLayer + neuronsPerHiddenLayer * outputLayerNeuronsCount) * sizeof(double));
+	int weightsNumber;
+	if(hiddenLayersCount > 0) {
+		weightsNumber = inputLayerNeuronsCount * neuronsPerHiddenLayer + (hiddenLayersCount - 1) * neuronsPerHiddenLayer * neuronsPerHiddenLayer + neuronsPerHiddenLayer * outputLayerNeuronsCount;
+	} else {
+		weightsNumber = inputLayerNeuronsCount * outputLayerNeuronsCount;
+	}
+	nn->weights = malloc(weightsNumber * sizeof(double));
 	nn->bias = malloc((neuronsCount - inputLayerNeuronsCount) * sizeof(double));
 
+	nn->weightsMomentum = weightsMomentum;
+	if(weightsMomentum > 0) {
+		nn->weightsVelocities = calloc(weightsNumber, sizeof(double));
+	}
 	// input layer
 	for(int i = 0; i < inputLayerNeuronsCount; i++) {
 		nn->net[i].layer = 0;
@@ -229,9 +247,10 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		int il = i + nn->lastLayerFirstIndex;
 		nn->net[il].layer = 1 + hiddenLayersCount;
 		nn->net[il].index = i;
-		nn->net[il].weightsCount = neuronsPerHiddenLayer;
-		double deviation = 1.0 / sqrt(neuronsPerHiddenLayer);
-		for(int k = 0; k < neuronsPerHiddenLayer; k++) {
+		int weightsCount = hiddenLayersCount > 0 ? neuronsPerHiddenLayer : inputLayerNeuronsCount;
+		nn->net[il].weightsCount = weightsCount;
+		double deviation = 1.0 / sqrt(weightsCount);
+		for(int k = 0; k < weightsCount; k++) {
 			double w = randomGauss(0, deviation);
 			//double w = randomUniform(-1, 1);
 			nn->weights[weightIndex] = w;
@@ -253,6 +272,7 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	free((**nn).weights);
 	free((**nn).bias);
 	free((**nn).lastCosts);
+	if((**nn).weightsMomentum > 0) free((**nn).weightsVelocities);
 	free(*nn);
 	*nn = NULL;
 }
@@ -342,6 +362,7 @@ void *processActivationQueue3(void *args) {
 		}
 	}
 }
+
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresult index < 0\n");
@@ -359,6 +380,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
 
 	struct ProcessActivationData data1, data2, data3;
+	// 0 below means first hidden layer.
 	for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
 		int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
 		enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
@@ -628,8 +650,17 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			}
 			break;
 	}
+
+	// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended. To be completely fair - if total samples amount is not divisible on mini batch size, then there will be some error, but in all real cases (many samples, limited mini batch) it will be minor and inconsequential, because cost is used only for some control, not in calculations themselfs.
+	cost /= samplesCount;
+
 	if(nn.l2RegularizationParameter > 0) {
-		int weightsCount = nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount;
+		int weightsCount;
+		if(nn.hiddenLayersCount > 0) {
+			weightsCount = nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount;
+		} else {// perceptron
+			weightsCount = nn.inputLayerNeuronsCount * nn.outputLayerNeuronsCount;
+		}
 		double weightsSquaresSum = 0;
 		double *weights = nn.weights;
 		for(int i = 0; i < weightsCount; i++) {
@@ -638,8 +669,6 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 		}
 		cost += nn.l2RegularizationParameter * weightsSquaresSum * 0.5 / nn.trainSamplesTotalAmount;
 	}
-	// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended. To be completely fair - if total samples amount is not divisible on mini batch size, then there will be some error, but in all real cases (many samples, limited mini batch) it will be minor and inconsequential, because cost is used only for some control, not in calculations themselfs.
-	cost /= samplesCount;
 
 	if(logsOutput != NULL) {
 		/*fprintf(logsOutput, "\ninputs:");
@@ -707,6 +736,7 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 	}
 
 	// Start with last weight, to go backwards during calculations, using next layer neurons.
+	// In case of perceptron (no hidden layers) link below will be incorrect, but it will not be used anyway, because function will end by for condition.
 	double *nextLayerLastWeight = nn.weights + nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount - 1;
 	double *nextLayerLastWeightForCurrentNeuron = nextLayerLastWeight;
 	for(; i >= nn.inputLayerNeuronsCount; i--) {
@@ -750,26 +780,39 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	double trainBlockCoeff = 1.0 / trainBlockSize;
 	double invertedSamplesNumber = 1.0;
 	if(nn.trainSamplesTotalAmount > 0) invertedSamplesNumber = 1.0 / nn.trainSamplesTotalAmount;
-	double l2RegularizationReducedByTrainBlocks = nn.l2RegularizationParameter * invertedSamplesNumber * trainBlockCoeff;
+	double l2RegularizationReducedBySamplesNumber = nn.l2RegularizationParameter * invertedSamplesNumber;
 
 	int previousLayerFirstIndex = 0;
 	int previousLayerNeuronsCount = nn.inputLayerNeuronsCount;
-	int currentLayerNeuronsCount = nn.neuronsPerHiddenLayer;
+	int currentLayerNeuronsCount = nn.hiddenLayersCount > 0 ? nn.neuronsPerHiddenLayer : nn.outputLayerNeuronsCount;
 	for(int layer = 1; layer <= nn.hiddenLayersCount + 1; layer++) {
 		bool firstHidden = layer == 1;
 		for(int index = 0; index < currentLayerNeuronsCount; index++) {
 			int neuronTotalIndex = nn.inputLayerNeuronsCount + (layer - 1) * nn.neuronsPerHiddenLayer + index;
-			double *weight = nn.weights + index * previousLayerNeuronsCount + !firstHidden * (nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer);
+			int weightsFirstIndex = index * previousLayerNeuronsCount + !firstHidden * (nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer);
+
+			double *weight = nn.weights + weightsFirstIndex;
+			double *velocities = nn.weightsVelocities + weightsFirstIndex;
 			double *bias = nn.bias + neuronTotalIndex - nn.inputLayerNeuronsCount;
 			double sumOfDeltas = 0;
+			double *resultsOfPreviousLayer = nn.resData + previousLayerFirstIndex;//It's content is sigma in formulas.
+
+			for(int k = 0; k < previousLayerNeuronsCount; k++) {
+				double sumOfWeightDeltas = 0;
+				for(int block = 0; block < trainBlockSize; block++) {
+					int trainBlockShift = nn.neuronsCount * block;
+					sumOfWeightDeltas += (*(resultsOfPreviousLayer + trainBlockShift)) * nn.deltasData[trainBlockShift + neuronTotalIndex];// This multiplication is gradient of weight.
+				}
+				double velocity = -trainCoeff * (sumOfWeightDeltas * trainBlockCoeff + l2RegularizationReducedBySamplesNumber * weight[k]);
+				if(nn.weightsMomentum > 0) {
+					velocity += nn.weightsMomentum * velocities[k];
+					velocities[k] = velocity;
+				}
+				weight[k] += velocity;
+				resultsOfPreviousLayer++;
+			}
 			for(int block = 0; block < trainBlockSize; block++) {
 				int trainBlockShift = nn.neuronsCount * block;
-				double *resultsOfPreviousLayer = nn.resData + trainBlockShift + previousLayerFirstIndex;//It's content is sigma in formulas.
-				double deltaReducedByTrainBlocks = nn.deltasData[trainBlockShift + neuronTotalIndex] * trainBlockCoeff;
-				for(int k = 0; k < previousLayerNeuronsCount; k++) {
-					weight[k] -= trainCoeff * (l2RegularizationReducedByTrainBlocks * weight[k] + (*resultsOfPreviousLayer) * deltaReducedByTrainBlocks);// Multiplication of last two is gradient of weight, divided by number of training blocks.
-					resultsOfPreviousLayer++;
-				}
 				sumOfDeltas += nn.deltasData[trainBlockShift + neuronTotalIndex];
 			}
 			*bias -= trainCoeff * sumOfDeltas * trainBlockCoeff;
@@ -1010,7 +1053,7 @@ void testXOR() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1066,7 +1109,7 @@ void testOR() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1121,7 +1164,7 @@ void testAND() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1344,7 +1387,7 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0);
 	printf("\nnetwork created\n");
 
 	double costFuncToStop = 0.02;
