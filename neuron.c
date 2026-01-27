@@ -22,19 +22,7 @@ void closeLogs() {
 	if(logsFile != NULL) fclose(logsFile);
 }
 
-int sign(int x) {
-	return (x > 0) - (x < 0);
-}
-
-double randomUniform(double from, double to) {
-	double interval = to - from;
-	assert(interval > 0);
-	int rand = random();
-	double fraction = (double)rand / RAND_MAX;
-	return from + fraction * interval;
-}
-
-double randomUniformForBoxMullerMethod() {// Return value in (0;1] semiopen interval.
+double randomUniformForBoxMullerMethod() {// Return value in (0;1], semiopen interval.
 	return ((double)random() + 1.0) / (RAND_MAX + 1.0);
 }
 
@@ -82,13 +70,13 @@ enum ActivationFunctionType {
 	sigmoid,
 	tanhyp,
 	ReLU,
-	softmax
+	softmax// Output layer only, with logLikehood cost function.
 };
 
 enum CostFunctionType {
 	square,
 	crossEntropy,// Only use with sigmoid output layer.
-	logLikehood// Only use with softmax output layer.
+	logLikehood// Only use with softmax output layer. In fact it is actually crossEntropy for softmax activation function.
 };
 
 double activation(double propagation, enum ActivationFunctionType aft) {
@@ -118,15 +106,8 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 		case softmax:
 			printf("\nNot supposed use softmax here.\n");
 			exit(1);
-
 	}
 }
-
-//TODO Will change after other activation functions are introduced.
-/*double derivativeOfActivation(struct Neuron neuron, double *inputs, int resIndex) {
-	// for sigmoid it is simple, but for other function must change
-	return derivativeOfLastActivation(neuron, resIndex);
-}*/
 
 struct Neuron {
 	int layer;
@@ -151,7 +132,6 @@ struct NeuralNetwork {
 	double trainCoeffCurrentDecreaser;
 	double trainCoeffDecreaserLimit;
 	int lastLayerFirstIndex;
-	double *lastCosts;
 	// Results go like this: allResults_block1, allResults_block2 ... allResults_last
 	double *resData;
 	double *deltasData;
@@ -188,7 +168,6 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->trainCoeffDecreaserLimit = 1;
 
 	nn->net = calloc(neuronsCount, sizeof(struct Neuron));
-	nn->lastCosts = calloc(trainBlockSize, sizeof(double));
 	nn->resData = calloc(trainBlockSize * neuronsCount, sizeof(double));
 	nn->deltasData = calloc(trainBlockSize * neuronsCount, sizeof(double));
 	// First hidden layer has number of weights equal to input layer neurons number multiplied to number of neurons in layer itself, the same logic applied to other hidden layers and output layer.
@@ -231,12 +210,10 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			double deviation = 1.0 / sqrt(previousLayerNeuronsCount);
 			for(int k = 0; k < previousLayerNeuronsCount; k++) {
 				double w = randomGauss(0, deviation);
-				//double w = randomUniform(-1, 1);
 				nn->weights[weightIndex] = w;
 				weightIndex++;
 			}
 			double bias = randomGauss(0, 1);
-			//double bias = randomUniform(0, 1);
 			nn->bias[il - inputLayerNeuronsCount] = bias;
 			nn->net[il].aft = aftHidden;
 		}
@@ -252,12 +229,10 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		double deviation = 1.0 / sqrt(weightsCount);
 		for(int k = 0; k < weightsCount; k++) {
 			double w = randomGauss(0, deviation);
-			//double w = randomUniform(-1, 1);
 			nn->weights[weightIndex] = w;
 			weightIndex++;
 		}
 		double bias = randomGauss(0, 1);
-		//double bias = randomUniform(0, 1);
 		nn->bias[il - inputLayerNeuronsCount] = bias;
 		nn->net[il].aft = aftOutput;
 	}
@@ -271,7 +246,6 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	free((**nn).deltasData);
 	free((**nn).weights);
 	free((**nn).bias);
-	free((**nn).lastCosts);
 	if((**nn).weightsMomentum > 0) free((**nn).weightsVelocities);
 	free(*nn);
 	*nn = NULL;
@@ -530,6 +504,7 @@ void printNetwork(struct NeuralNetwork nn) {
 }
 
 void printNetworkInFile(struct NeuralNetwork nn) {
+	if(logsFile == NULL) return;
 	int maxLevel = nn.inputLayerNeuronsCount;
 	if(nn.outputLayerNeuronsCount > maxLevel) maxLevel = nn.outputLayerNeuronsCount;
 	if(nn.neuronsPerHiddenLayer > maxLevel) maxLevel = nn.neuronsPerHiddenLayer;
@@ -606,9 +581,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 					sampleCost += pow(nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i] - desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i], 2);
 				}
-				sampleCost *= 0.5;
-				nn.lastCosts[resIndex] = sampleCost;
-				cost += sampleCost;
+				cost += sampleCost * 0.5;
 			}
 			break;
 		case crossEntropy:
@@ -624,7 +597,6 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 					if(realSubtracted < nanPreventionLimit) realSubtracted = nanPreventionLimit;
 					sampleCost += -(desired * log(real) + (1 - desired) * log(realSubtracted));
 				}
-				nn.lastCosts[resIndex] = sampleCost;
 				cost += sampleCost;
 			}
 			break;
@@ -645,7 +617,6 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 						exit(1);
 					}
 				}
-				nn.lastCosts[resIndex] = sampleCost;
 				cost += sampleCost;
 			}
 			break;
@@ -881,7 +852,7 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 
 	for(int c = 0; c < maxCycles; c++) {
 		printf("\ngroup train cycle %d", c);
-		fprintf(logsFile, "\ngroup train cycle %d", c);
+		if(logsFile != NULL) fprintf(logsFile, "\ngroup train cycle %d", c);
 
 		double cycleCost = 0;
 		shuffle(indexes, examplesQuantity);
@@ -921,7 +892,7 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
 	for(int c = 0; c < maxCycles; c++) {
-		fprintf(logsFile, "\ngroup together train cycle %d", c);
+		if(logsFile != NULL) fprintf(logsFile, "\ngroup together train cycle %d", c);
 		for(int i = 0; i < examplesQuantity; i++) {
 			for(int k = 0; k < inputSize; k++) {
 				input[k] = inputs[inputSize * i + k];
@@ -948,13 +919,13 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	free(output);
 }
 
-struct MNISTCheckResults {
-	double trainRes;
+struct NetworkEvalResults {
+	//double trainRes;
 	double testRes;
 };
 
 // train by small batch of samples at once, reshuffling after all batches was processed in current cycle
-void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles, int batchSize, struct MNISTCheckResults (*mnistCorrectness)()) {
+void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, struct NetworkEvalResults (*netCorrectness)()) {
 	// array of indexes to shuffle examples before each training cycle
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -973,7 +944,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	double lastImprovementCorrectness = 0;
 
 	for(int c = 0; c < maxCycles; c++) {
-		//fprintf(logsFile, "\ngroup together train cycle %d", c);
+		if(logsFile != NULL) fprintf(logsFile, "\ngroup together train cycle %d", c);
 
 		shuffle(indexes, examplesQuantity);
 
@@ -1006,12 +977,13 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 		//printNetworkInFile(nn);
 
 		cycleCost /= totalInternalCycles;
-		//fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
+		if(logsFile != NULL) fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
 		printf("\ncycle %d cost function: %f\n", c, cycleCost);
 
-		if(mnistCorrectness != NULL) {
-			struct MNISTCheckResults correctness = (*mnistCorrectness)();
-			printf("\ncorrectness by train data: %f, by test data: %f\n", correctness.trainRes, correctness.testRes);
+		if(netCorrectness != NULL) {
+			struct NetworkEvalResults correctness = (*netCorrectness)();
+			//printf("\ncorrectness by train data: %f, by test data: %f\n", correctness.trainRes, correctness.testRes);
+			printf("\ncorrectness by test data: %f\n", correctness.testRes);
 			if(nn.noImprovementsEpochsLimit > 0) {
 				if(correctness.testRes > lastImprovementCorrectness) {
 					lastImprovementCorrectness = correctness.testRes;
@@ -1031,14 +1003,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 					}
 				}
 			}
-		}
-
-		if(cycleCost < costFunctionToStop) {
-			free(indexes);
-			free(batchOutputs);
-			free(input);
-			free(output);
-			return;
 		}
 	}
 
@@ -1161,7 +1125,6 @@ void testOR() {
 
 void testAND() {
 	int maxTrainCycles = 1000;
-	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
 	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
@@ -1191,7 +1154,7 @@ void testAND() {
 				0,
 				0
 	};
-	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles, 2, NULL);
+	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, maxTrainCycles, 2, NULL);
 
 	printf("\ntest and:\n");
 
@@ -1214,6 +1177,63 @@ void testAND() {
 	destroyNetwork(&nn);
 }
 
+int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, bool isTrain) {
+	int inputSize = nn.inputLayerNeuronsCount;
+	int outputSize = nn.outputLayerNeuronsCount;
+	int correctCounter = 0;
+	for(int i = 0; i < examplesQuantity; i++) {
+		double *input = inputs + inputSize * i;
+		calculate(nn, input, 0);
+
+		int lastLayerFirstIndex = nn.inputLayerNeuronsCount + nn.hiddenLayersCount * nn.neuronsPerHiddenLayer;
+		double maxRes = -1;
+		int maxResIndex = 0;
+
+		double *output = outputs + outputSize * i;
+		for(int k = 0; k < outputSize; k++) {
+			double res = output[k];
+			if(res > maxRes) {
+				maxRes = res;
+				maxResIndex = k;
+			}
+		}
+		int correctResIndex = maxResIndex;
+
+		maxRes = -1;
+		maxResIndex = 0;
+		for(int k = 0; k < outputSize; k++) {
+			double res = nn.resData[lastLayerFirstIndex + k];
+			if(res > maxRes) {
+				maxRes = res;
+				maxResIndex = k;
+			}
+		}
+		if(maxResIndex == correctResIndex) correctCounter++;
+	}
+	printf("\nEvaluation, correct data: %d/%d, is this training data %b\n", correctCounter, examplesQuantity, isTrain);
+
+	return correctCounter;
+}
+
+struct NeuralNetwork *globalValNetworkForEvaluationTest;
+/*
+double *globalValNetworkTrainInputs;
+unsigned char *globalValNetworkTrainOutputs;
+int globalValNetworkTrainExamplesQuantity;
+*/
+double *globalValNetworkTestInputs;
+double *globalValNetworkTestOutputs;
+int globalValNetworkTestExamplesQuantity;
+
+struct NetworkEvalResults evalNetworkByTestDataForFunctionParam() {
+	//int correctAmountTrainData = testNetworkByEvalData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTrainInputs, globalValMNISTTrainOutputs, globalValMNISTTrainExamplesQuantity, true);
+	int correctAmountTestData = testNetworkByEvalData(*globalValNetworkForEvaluationTest, globalValNetworkTestInputs, globalValNetworkTestOutputs, globalValNetworkTestExamplesQuantity, false);
+	struct NetworkEvalResults res;
+	//res.trainRes = ((double)correctAmountTrainData) / globalValNetworkTrainExamplesQuantity;
+	res.testRes = ((double)correctAmountTestData) / globalValNetworkTestExamplesQuantity;
+	return res;
+}
+
 struct MNIST_Data {
 	int dimensionsAmount;
 	int *dimensions;
@@ -1224,57 +1244,6 @@ struct MNIST_Data {
 void freeMNIST(struct MNIST_Data mnist) {
 	free(mnist.dimensions);
 	free(mnist.data);
-}
-
-int testNetworkByMNISTData(struct NeuralNetwork nn, double *inputs, unsigned char *outputs, int examplesQuantity, bool isTrain) {
-	int mnistSize = 784;
-	int digits = 10;
-	double *input = malloc(mnistSize * sizeof(double));
-	int correctCounter = 0;
-	for(int i = 0; i < examplesQuantity; i++) {
-		for(int k = 0; k < mnistSize; k++) {
-			input[k] = inputs[mnistSize * i + k];
-		}
-
-		calculate(nn, input, 0);
-
-		int lastLayerFirstIndex = nn.inputLayerNeuronsCount + nn.hiddenLayersCount * nn.neuronsPerHiddenLayer;
-		double maxRes = -1;
-		int maxResIndex = 0;
-		int correctResIndex = outputs[i];
-
-		for(int k = 0; k < digits; k++) {
-			double res = nn.resData[lastLayerFirstIndex + k];
-			if(res > maxRes) {
-				maxRes = res;
-				maxResIndex = k;
-			}
-		}
-		if(maxResIndex == correctResIndex) correctCounter++;
-	}
-	printf("\nmnist correct data: %d/%d %b\n", correctCounter, examplesQuantity, isTrain);
-	free(input);
-
-	return correctCounter;
-}
-
-struct NeuralNetwork *globalValNetworkForMNISTSpecialTest;
-
-double *globalValMNISTTrainInputs;
-unsigned char *globalValMNISTTrainOutputs;
-int globalValMNISTTrainExamplesQuantity;
-
-double *globalValMNISTTestInputs;
-unsigned char *globalValMNISTTestOutputs;
-int globalValMNISTTestExamplesQuantity;
-
-struct MNISTCheckResults testNetworkByMNISTDataForFunctionParam() {
-	int correctAmountTrainData = testNetworkByMNISTData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTrainInputs, globalValMNISTTrainOutputs, globalValMNISTTrainExamplesQuantity, true);
-	int correctAmountTestData = testNetworkByMNISTData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTestInputs, globalValMNISTTestOutputs, globalValMNISTTestExamplesQuantity, false);
-	struct MNISTCheckResults res;
-	res.trainRes = ((double)correctAmountTrainData) / globalValMNISTTrainExamplesQuantity;
-	res.testRes = ((double)correctAmountTestData) / globalValMNISTTestExamplesQuantity;
-	return res;
 }
 
 struct MNIST_Data readMNIST(char *fileName) {
@@ -1378,7 +1347,9 @@ void testMNIST() {
 	}
 */
 	double *inputsTest = malloc(mnistTestImages.count * 784 * sizeof(double));
+	double *outputsTest = calloc(mnistTestLabels.count * 10, sizeof(double));
 	for(int i = 0; i < mnistTestLabels.count; i++) {
+		outputsTest[i * 10 + mnistTestLabels.data[i]] = 1;
 		for(int k = 0; k < 784; k++) {
 			inputsTest[i * 784 + k] = ((double)mnistTestImages.data[i * 784 + k]) / 255.0;
 		}
@@ -1390,28 +1361,28 @@ void testMNIST() {
 	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0);
 	printf("\nnetwork created\n");
 
-	double costFuncToStop = 0.02;
 	int maxTrainCycles = 10;
 
-	globalValNetworkForMNISTSpecialTest = nn;
-	globalValMNISTTestInputs = inputsTest;
-	globalValMNISTTestOutputs = mnistTestLabels.data;
-	globalValMNISTTestExamplesQuantity = mnistTestImages.count;
-
-	globalValMNISTTrainInputs = inputs;
-	globalValMNISTTrainOutputs = mnistTrainLabels.data;
-	globalValMNISTTrainExamplesQuantity = mnistTrainImages.count;
-
+	globalValNetworkForEvaluationTest = nn;
+	globalValNetworkTestInputs = inputsTest;
+	globalValNetworkTestOutputs = outputsTest;
+	globalValNetworkTestExamplesQuantity = mnistTestImages.count;
+/*
+	globalValNetworkTrainInputs = inputs;
+	globalValNetworkTrainOutputs = mnistTrainLabels.data;
+	globalValNetworkTrainExamplesQuantity = mnistTrainImages.count;
+*/
 //	nn->l2RegularizationParameter = 5.0;
 //	nn->trainSamplesTotalAmount = mnistTrainImages.count;
 //	nn->noImprovementsEpochsLimit = 10;
 //	nn->trainCoeffDecreaserLimit = 0.0625;
 //	nn->trainCoeffCurrentDecreaser = 1.0;
-	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, costFuncToStop, maxTrainCycles, trainBlockSize, testNetworkByMNISTDataForFunctionParam);
+	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, trainBlockSize, evalNetworkByTestDataForFunctionParam);
 
 	free(inputs);
 	free(outputs);
 	free(inputsTest);
+	free(outputsTest);
 	destroyNetwork(&nn);
 	freeMNIST(mnistTrainImages);
 	freeMNIST(mnistTrainLabels);
