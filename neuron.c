@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <time.h>
 #include <stdint.h>
@@ -73,11 +74,52 @@ enum ActivationFunctionType {
 	softmax// Output layer only, with logLikehood cost function.
 };
 
+char* aftToString(enum ActivationFunctionType aft) {
+	switch(aft) {
+		case sigmoid:
+			return "sigmoid";
+		case tanhyp:
+			return "tanhyp";
+		case ReLU:
+			return "ReLU";
+		case softmax:
+			return "softmax";
+	}
+}
+
+enum ActivationFunctionType stringToAFT(char* str) {
+	if(strcmp(str, "sigmoid") == 0) return sigmoid;
+	if(strcmp(str, "tanhyp") == 0) return tanhyp;
+	if(strcmp(str, "ReLU") == 0) return ReLU;
+	if(strcmp(str, "softmax") == 0) return softmax;
+	printf("\nUnknown activation function type %s\n, returning standart sigmoid as fallback", str);
+	return sigmoid;
+}
+
 enum CostFunctionType {
 	square,
 	crossEntropy,// Only use with sigmoid output layer.
 	logLikehood// Only use with softmax output layer. In fact it is actually crossEntropy for softmax activation function.
 };
+
+char* cftToString(enum CostFunctionType cft) {
+	switch(cft) {
+		case square:
+			return "square";
+		case crossEntropy:
+			return "crossEntropy";
+		case logLikehood:
+			return "logLikehood";
+	}
+}
+
+enum CostFunctionType stringToCFT(char* str) {
+	if(strcmp(str, "square") == 0) return square;
+	if(strcmp(str, "crossEntropy") == 0) return crossEntropy;
+	if(strcmp(str, "logLikehood") == 0) return logLikehood;
+	printf("\nUnknown cost function type %s\n, returning standart square as fallback", str);
+	return square;
+}
 
 double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
@@ -142,7 +184,7 @@ struct NeuralNetwork {
 };
 
 /* All info based on MNIST tests. trainCoeff for square cft and all sigmoids is 2.8. If use crossEntropy 0.5. softmax and cft logLikehood 0.05. ReLU for hidden layers demands decrease it to 0.1 and below if its higher.*/
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double trainCoeff, double weightsMomentum) {
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases) {
 	// Softmax can be only in the last layer.
 	if(aftHidden == softmax) {
 		printf("\nSoftmax can be only in the last layer.\n");
@@ -160,7 +202,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->trainBlockSize = trainBlockSize;
 	nn->lastLayerFirstIndex = neuronsCount - outputLayerNeuronsCount;
 	nn->cft = cft;
-	nn->baseTrainCoeff = trainCoeff;
+	nn->baseTrainCoeff = baseTrainCoeff;
 	nn->l2RegularizationParameter = 0;
 	nn->trainSamplesTotalAmount = 0;
 	nn->noImprovementsEpochsLimit = 0;
@@ -177,8 +219,17 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	} else {
 		weightsNumber = inputLayerNeuronsCount * outputLayerNeuronsCount;
 	}
-	nn->weights = malloc(weightsNumber * sizeof(double));
-	nn->bias = malloc((neuronsCount - inputLayerNeuronsCount) * sizeof(double));
+	if(loadedWeights == NULL) {
+		nn->weights = malloc(weightsNumber * sizeof(double));
+	} else {
+		nn->weights = loadedWeights;
+	}
+	int biasNumber = neuronsCount - inputLayerNeuronsCount;
+	if(loadedBiases == NULL) {
+		nn->bias = malloc(biasNumber * sizeof(double));
+	} else {
+		nn->bias = loadedBiases;
+	}
 
 	nn->weightsMomentum = weightsMomentum;
 	if(weightsMomentum > 0) {
@@ -207,15 +258,20 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			}
 			
 			nn->net[il].weightsCount = previousLayerNeuronsCount;
-			double deviation = 1.0 / sqrt(previousLayerNeuronsCount);
-			for(int k = 0; k < previousLayerNeuronsCount; k++) {
-				double w = randomGauss(0, deviation);
-				nn->weights[weightIndex] = w;
-				weightIndex++;
-			}
-			double bias = randomGauss(0, 1);
-			nn->bias[il - inputLayerNeuronsCount] = bias;
 			nn->net[il].aft = aftHidden;
+
+			if(loadedWeights == NULL) {
+				double deviation = 1.0 / sqrt(previousLayerNeuronsCount);
+				for(int k = 0; k < previousLayerNeuronsCount; k++) {
+					double w = randomGauss(0, deviation);
+					nn->weights[weightIndex] = w;
+					weightIndex++;
+				}
+			}
+			if(loadedBiases == NULL) {
+				double bias = randomGauss(0, 1);
+				nn->bias[il - inputLayerNeuronsCount] = bias;
+			}
 		}
 	}
 
@@ -226,15 +282,20 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		nn->net[il].index = i;
 		int weightsCount = hiddenLayersCount > 0 ? neuronsPerHiddenLayer : inputLayerNeuronsCount;
 		nn->net[il].weightsCount = weightsCount;
-		double deviation = 1.0 / sqrt(weightsCount);
-		for(int k = 0; k < weightsCount; k++) {
-			double w = randomGauss(0, deviation);
-			nn->weights[weightIndex] = w;
-			weightIndex++;
-		}
-		double bias = randomGauss(0, 1);
-		nn->bias[il - inputLayerNeuronsCount] = bias;
 		nn->net[il].aft = aftOutput;
+
+		if(loadedWeights == NULL) {
+			double deviation = 1.0 / sqrt(weightsCount);
+			for(int k = 0; k < weightsCount; k++) {
+				double w = randomGauss(0, deviation);
+				nn->weights[weightIndex] = w;
+				weightIndex++;
+			}
+		}
+		if(loadedBiases == NULL) {
+			double bias = randomGauss(0, 1);
+			nn->bias[il - inputLayerNeuronsCount] = bias;
+		}
 	}
 
 	return nn;
@@ -249,6 +310,177 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	if((**nn).weightsMomentum > 0) free((**nn).weightsVelocities);
 	free(*nn);
 	*nn = NULL;
+}
+
+void saveNetwork(struct NeuralNetwork nn, char *fileName) {
+	FILE *file = fopen(fileName, "w");
+	if(file == NULL) {
+		printf("\nCould not open file %s to save network\n", fileName);
+		return;
+	}
+	char buf[100];
+	snprintf(buf, sizeof(buf), "inputLayerNeuronsCount %d\n", nn.inputLayerNeuronsCount);
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+	snprintf(buf, sizeof(buf), "outputLayerNeuronsCount %d\n", nn.outputLayerNeuronsCount);
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+	snprintf(buf, sizeof(buf), "hiddenLayersCount %d\n", nn.hiddenLayersCount);
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+	snprintf(buf, sizeof(buf), "neuronsPerHiddenLayer %d\n", nn.neuronsPerHiddenLayer);
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+	/*snprintf(buf, sizeof(buf), "trainBlockSize %d\n", nn.trainBlockSize);
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}*/
+	snprintf(buf, sizeof(buf), "aftHidden %s\n", aftToString(nn.net[nn.inputLayerNeuronsCount].aft));
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+	snprintf(buf, sizeof(buf), "aftOutput %s\n", aftToString(nn.net[nn.neuronsCount - 1].aft));
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+	snprintf(buf, sizeof(buf), "cft %s\n", cftToString(nn.cft));
+	if(fputs(buf, file) == EOF) {
+		printf("Could not write %s to %s\n", buf, fileName);
+	}
+
+	int weightsNumber;
+	if(nn.hiddenLayersCount > 0) {
+		weightsNumber = nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount;
+	} else {
+		weightsNumber = nn.inputLayerNeuronsCount * nn.outputLayerNeuronsCount;
+	}
+	int biasNumber = nn.neuronsCount - nn.inputLayerNeuronsCount;
+
+	fputs("Weights:\n", file);
+
+	for(int i = 0; i < weightsNumber; i++) {
+		snprintf(buf, sizeof(buf), "%.17f\n", nn.weights[i]);
+		if(fputs(buf, file) == EOF) {
+			printf("Could not write weight %s to %s\n", buf, fileName);
+		}
+	}
+	fputs("Biases:\n", file);
+	for(int i = 0; i < biasNumber; i++) {
+		snprintf(buf, sizeof(buf), "%.17f\n", nn.bias[i]);
+		if(fputs(buf, file) == EOF) {
+			printf("Could not write bias %s to %s\n", buf, fileName);
+		}
+	}
+	fclose(file);
+}
+
+struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double weightMomentum) {
+	FILE *file = fopen(fileName, "r");
+	if(file == NULL) {
+		printf("Could not open file %s for read.\n", fileName);
+		return NULL;
+	}
+	char buf[100];
+
+	int inputLayerNeuronsCount = 0;
+	int outputLayerNeuronsCount = 0;
+	int hiddenLayersCount = 0;
+	int neuronsPerHiddenLayer = 0;
+	//int trainBlockSize = 0;
+	enum ActivationFunctionType aftHidden;
+	enum ActivationFunctionType aftOutput;
+	enum CostFunctionType cft;
+
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		inputLayerNeuronsCount = strtol(partOfSplit, NULL, 10);
+		printf("inputLayerNeuronsCount is %d\n", inputLayerNeuronsCount);
+	}
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		outputLayerNeuronsCount = strtol(partOfSplit, NULL, 10);
+		printf("outputLayerNeuronsCount is %d\n", outputLayerNeuronsCount);
+	}
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		hiddenLayersCount = strtol(partOfSplit, NULL, 10);
+		printf("hiddenLayersCount is %d\n", hiddenLayersCount);
+	}
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		neuronsPerHiddenLayer = strtol(partOfSplit, NULL, 10);
+		printf("neuronsPerHiddenLayer is %d\n", neuronsPerHiddenLayer);
+	}
+	/*if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		trainBlockSize = strtol(partOfSplit, NULL, 10);
+		printf("trainBlockSize is %d\n", trainBlockSize);
+	}*/
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		partOfSplit[strcspn(partOfSplit, "\n")] = 0;// Get rid of eol at the end.
+		aftHidden = stringToAFT(partOfSplit);
+		printf("aftHidden is %s %d\n", partOfSplit, aftHidden);
+	}
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		partOfSplit[strcspn(partOfSplit, "\n")] = 0;// Get rid of eol at the end.
+		aftOutput = stringToAFT(partOfSplit);
+		printf("aftOutput is %s %d\n", partOfSplit, aftOutput);
+	}
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		char *partOfSplit = strtok(buf, " ");
+		partOfSplit = strtok(NULL, " ");
+		partOfSplit[strcspn(partOfSplit, "\n")] = 0;// Get rid of eol at the end.
+		cft = stringToCFT(partOfSplit);
+		printf("cft is %s %d\n", partOfSplit, cft);
+	}
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		if(strcmp(buf, "Weights:\n") != 0) printf("Did not find weights label\n");
+	}
+	int weightsNumber;
+	if(hiddenLayersCount > 0) {
+		weightsNumber = inputLayerNeuronsCount * neuronsPerHiddenLayer + (hiddenLayersCount - 1) * neuronsPerHiddenLayer * neuronsPerHiddenLayer + neuronsPerHiddenLayer * outputLayerNeuronsCount;
+	} else {
+		weightsNumber = inputLayerNeuronsCount * outputLayerNeuronsCount;
+	}
+	double *weights = malloc(weightsNumber * sizeof(double));
+	for(int i = 0; i < weightsNumber; i++) {
+		if(fgets(buf, sizeof(buf), file) != NULL) {
+			double weight = strtod(buf, NULL);
+			weights[i] = weight;
+			//printf("weight %d is %f\n", i, weight);
+		}
+	}
+
+	if(fgets(buf, sizeof(buf), file) != NULL) {
+		if(strcmp(buf, "Biases:\n") != 0) printf("Did not find biases label\n");
+	}
+	int neuronsCount = inputLayerNeuronsCount + outputLayerNeuronsCount + hiddenLayersCount * neuronsPerHiddenLayer;
+	int biasesNumber = neuronsCount - inputLayerNeuronsCount;
+	double *bias = malloc((biasesNumber) * sizeof(double));
+	for(int i = 0; i < biasesNumber; i++) {
+		if(fgets(buf, sizeof(buf), file) != NULL) {
+			double biasI = strtod(buf, NULL);
+			bias[i] = biasI;
+			//printf("bias %d is %f\n", i, biasI);
+		}
+	}
+	fclose(file);
+
+	struct NeuralNetwork *nn = createNetwork(inputLayerNeuronsCount, outputLayerNeuronsCount, hiddenLayersCount, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, baseTrainCoeff, weightMomentum, weights, bias);
+	return nn;
 }
 
 struct ProcessActivationData {
@@ -1017,7 +1249,7 @@ void testXOR() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1064,7 +1296,15 @@ void testXOR() {
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
 	printNetworkInFile(*nn);
-
+/*
+	saveNetwork(*nn, "net.txt");
+	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 2.5, 0);
+	printf("\nLoaded network\n");
+	calculate(*loadedNet, inputs, 0);
+	printNetwork(*loadedNet);
+	costFunction(*loadedNet, outputs, 1, stdout);
+	destroyNetwork(&loadedNet);
+*/
 	destroyNetwork(&nn);
 }
 
@@ -1073,7 +1313,7 @@ void testOR() {
 	double costFuncToStop = 0.015;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1127,7 +1367,7 @@ void testAND() {
 	int maxTrainCycles = 1000;
 
 	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0);
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -1358,7 +1598,7 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	int maxTrainCycles = 10;
@@ -1378,7 +1618,14 @@ void testMNIST() {
 //	nn->trainCoeffDecreaserLimit = 0.0625;
 //	nn->trainCoeffCurrentDecreaser = 1.0;
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, trainBlockSize, evalNetworkByTestDataForFunctionParam);
-
+/*
+	saveNetwork(*nn, "net.txt");
+	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 0.5, 0);
+	printf("\nLoaded network\n");
+	int correctAmountTestData = testNetworkByEvalData(*loadedNet, inputsTest, outputsTest, mnistTestImages.count, false);
+	printf("\nCorrect test data: %d\n", correctAmountTestData);
+	destroyNetwork(&loadedNet);
+*/
 	free(inputs);
 	free(outputs);
 	free(inputsTest);
