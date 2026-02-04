@@ -1,28 +1,24 @@
+#include "nn_NeuralNetwork.h"
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <time.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <unistd.h>
 
 FILE *logsFile = NULL;
 bool useThreading = false;
 
-void setupLogs() {
-	//logsFile = fopen("logs.txt", "w");
-	//logsFile = fopen("/dev/null", "w");
-	//logsFile = stdout;
+// Logging.
+void setupLogs(bool inConsole) {
+	if(inConsole) logsFile = stdout;
+	else logsFile = fopen("nn_logs.txt", "w");
 }
 
 void closeLogs() {
 	if(logsFile != NULL) fclose(logsFile);
 }
 
+// Random Gauss distribution by Box-Muller transform. randomGauss below is final function to use.
 double randomUniformForBoxMullerMethod() {// Return value in (0;1], semiopen interval.
 	return ((double)random() + 1.0) / (RAND_MAX + 1.0);
 }
@@ -37,6 +33,7 @@ double randomGauss(double mean, double deviation) {
 	return randomGauss01() * deviation + mean;
 }
 
+// Used for training samples shuffling, to improve neural network learning.
 void shuffle(int* array, int length) {
 	if(length < 1) return;
 	for(int i = 0; i < length; i++) {
@@ -47,6 +44,7 @@ void shuffle(int* array, int length) {
 	}
 }
 
+// Used to multiply neuron weights on its inputs.
 double dotProduct(double *array1, double* array2, int count) {
 	double res = 0;
 	int i = 0;
@@ -66,14 +64,7 @@ double dotProduct(double *array1, double* array2, int count) {
 	return res;
 }
 
-// TODO Make better ways for combinations of cost functions and activation ones, to prevent accidently set incompatibles.
-enum ActivationFunctionType {
-	sigmoid,
-	tanhyp,
-	ReLU,
-	softmax// Output layer only, with logLikehood cost function.
-};
-
+// Helper functions for network saving and loading.
 char* aftToString(enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
@@ -96,12 +87,6 @@ enum ActivationFunctionType stringToAFT(char* str) {
 	return sigmoid;
 }
 
-enum CostFunctionType {
-	square,
-	crossEntropy,// Only use with sigmoid output layer.
-	logLikehood// Only use with softmax output layer. In fact it is actually crossEntropy for softmax activation function.
-};
-
 char* cftToString(enum CostFunctionType cft) {
 	switch(cft) {
 		case square:
@@ -121,6 +106,7 @@ enum CostFunctionType stringToCFT(char* str) {
 	return square;
 }
 
+// Neuron activation function, based on its own inputs, thus softmax, that use all neurons in current layer, to calculate each of its output, can't be done here.
 double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
@@ -151,39 +137,7 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 	}
 }
 
-struct Neuron {
-	int layer;
-	int index;
-	int weightsCount;
-	enum ActivationFunctionType aft;
-};
-
-struct NeuralNetwork {
-	struct Neuron *net;
-	int neuronsCount;
-	int inputLayerNeuronsCount;
-	int outputLayerNeuronsCount;
-	int hiddenLayersCount;
-	int neuronsPerHiddenLayer;
-	enum CostFunctionType cft;
-	int trainBlockSize;
-	double baseTrainCoeff;
-	double l2RegularizationParameter;
-	int trainSamplesTotalAmount;
-	int noImprovementsEpochsLimit;
-	double trainCoeffCurrentDecreaser;
-	double trainCoeffDecreaserLimit;
-	int lastLayerFirstIndex;
-	// Results go like this: allResults_block1, allResults_block2 ... allResults_last
-	double *resData;
-	double *deltasData;
-	double *weights;
-	double *bias;
-	double weightsMomentum;
-	double *weightsVelocities;
-};
-
-/* All info based on MNIST tests. trainCoeff for square cft and all sigmoids is 2.8. If use crossEntropy 0.5. softmax and cft logLikehood 0.05. ReLU for hidden layers demands decrease it to 0.1 and below if its higher.*/
+// Used for creating new network or loading saved one, by additionally providing weights and biases.
 struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases) {
 	// Softmax can be only in the last layer.
 	if(aftHidden == softmax) {
@@ -212,7 +166,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->net = calloc(neuronsCount, sizeof(struct Neuron));
 	nn->resData = calloc(trainBlockSize * neuronsCount, sizeof(double));
 	nn->deltasData = calloc(trainBlockSize * neuronsCount, sizeof(double));
-	// First hidden layer has number of weights equal to input layer neurons number multiplied to number of neurons in layer itself, the same logic applied to other hidden layers and output layer.
+	// First hidden layer has number of weights equal to input layer neurons number, multiplied to number of neurons in layer itself, the same logic applied to other hidden layers and output layer.
 	int weightsNumber;
 	if(hiddenLayersCount > 0) {
 		weightsNumber = inputLayerNeuronsCount * neuronsPerHiddenLayer + (hiddenLayersCount - 1) * neuronsPerHiddenLayer * neuronsPerHiddenLayer + neuronsPerHiddenLayer * outputLayerNeuronsCount;
@@ -312,6 +266,7 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	*nn = NULL;
 }
 
+// Simple save and load, without optimizations or proper error handling.
 void saveNetwork(struct NeuralNetwork nn, char *fileName) {
 	FILE *file = fopen(fileName, "w");
 	if(file == NULL) {
@@ -335,10 +290,6 @@ void saveNetwork(struct NeuralNetwork nn, char *fileName) {
 	if(fputs(buf, file) == EOF) {
 		printf("Could not write %s to %s\n", buf, fileName);
 	}
-	/*snprintf(buf, sizeof(buf), "trainBlockSize %d\n", nn.trainBlockSize);
-	if(fputs(buf, file) == EOF) {
-		printf("Could not write %s to %s\n", buf, fileName);
-	}*/
 	snprintf(buf, sizeof(buf), "aftHidden %s\n", aftToString(nn.net[nn.inputLayerNeuronsCount].aft));
 	if(fputs(buf, file) == EOF) {
 		printf("Could not write %s to %s\n", buf, fileName);
@@ -390,7 +341,6 @@ struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double bas
 	int outputLayerNeuronsCount = 0;
 	int hiddenLayersCount = 0;
 	int neuronsPerHiddenLayer = 0;
-	//int trainBlockSize = 0;
 	enum ActivationFunctionType aftHidden;
 	enum ActivationFunctionType aftOutput;
 	enum CostFunctionType cft;
@@ -419,12 +369,6 @@ struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double bas
 		neuronsPerHiddenLayer = strtol(partOfSplit, NULL, 10);
 		printf("neuronsPerHiddenLayer is %d\n", neuronsPerHiddenLayer);
 	}
-	/*if(fgets(buf, sizeof(buf), file) != NULL) {
-		char *partOfSplit = strtok(buf, " ");
-		partOfSplit = strtok(NULL, " ");
-		trainBlockSize = strtol(partOfSplit, NULL, 10);
-		printf("trainBlockSize is %d\n", trainBlockSize);
-	}*/
 	if(fgets(buf, sizeof(buf), file) != NULL) {
 		char *partOfSplit = strtok(buf, " ");
 		partOfSplit = strtok(NULL, " ");
@@ -483,6 +427,7 @@ struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double bas
 	return nn;
 }
 
+// Separate network feedforward calculations on 4 threads.
 struct ProcessActivationData {
 	enum ActivationFunctionType aft;
 	int weightsNumber;
@@ -569,6 +514,7 @@ void *processActivationQueue3(void *args) {
 	}
 }
 
+// Feedforward data to network. resIndex parameter show index of sample in mini batch, to save results properly for future use during learning.
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresult index < 0\n");
@@ -666,7 +612,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	}
 }
 
-// for small networks only and one result
+// Use for small networks only and one result (if batches are used, only first result will be printed).
 void printNetwork(struct NeuralNetwork nn) {
 	//printf("\x1b[2B");
 	printf("\n");
@@ -735,6 +681,7 @@ void printNetwork(struct NeuralNetwork nn) {
 	}
 }
 
+// Can be used for any network and print batch results too.
 void printNetworkInFile(struct NeuralNetwork nn) {
 	if(logsFile == NULL) return;
 	int maxLevel = nn.inputLayerNeuronsCount;
@@ -797,13 +744,11 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 }
 
 #define nanPreventionLimit 0.001
-// cost function
 double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samplesCount, FILE *logsOutput) {
 	/*if(samplesCount < 1) {
 		fprintf(stderr, "\ntrainSize < 1\n");
 		exit(1);
 	}*/
-	// calculate cost function as 1/2 * sum(errorPerOutputNeuron^2)
 	double cost = 0;
 
 	switch(nn.cft) {
@@ -833,7 +778,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			}
 			break;
 		case logLikehood:
-			// This can be used only with activation functions, that lead to final results resemble probability distribution and desired results being 0 and 1 only.
+			// This can be used only with activation functions, that lead to final results resembling probability distribution and desired results being 0 and 1 only.
 			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
 				double sampleCost = 0;
 				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
@@ -857,6 +802,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 	// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended. To be completely fair - if total samples amount is not divisible on mini batch size, then there will be some error, but in all real cases (many samples, limited mini batch) it will be minor and inconsequential, because cost is used only for some control, not in calculations themselfs.
 	cost /= samplesCount;
 
+	// L2 regularization.
 	if(nn.l2RegularizationParameter > 0) {
 		int weightsCount;
 		if(nn.hiddenLayersCount > 0) {
@@ -903,7 +849,6 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 	return cost;
 }
 
-// add bias in formula after main mechanics work
 void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 	/*if(resIndex < 0) {
 		fprintf(stderr, "\nresIndex < 0\n");
@@ -975,6 +920,7 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 	}
 }
 
+// Whoever read this - sorry for quite messy code below - original readable version was sacrificed for performance. I was surprised by how much improvements can be achieved even just by moving variables initializations layers above, if possible.
 void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	/*if(trainBlockSize < 1) {
 		fprintf(stderr, "\ntrain size < 1\n");
@@ -1059,6 +1005,7 @@ void stopThreading() {
 	sem_destroy(&sem3);
 }
 
+// Used in simple gradient descent below.
 void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycles) {
 	for(int i = 0; i < maxCycles; i++) {
 		calculate(nn, inputs, 0);
@@ -1070,9 +1017,9 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycl
 	}
 }
 
-// train by one sample at the time, cycling all of them
+// Train by one sample at the time, cycling all of them.
 void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
-	// array of indexes to shuffle examples before each training cycle
+	// Array of indexes to shuffle examples before each training cycle.
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	printf("\nindexes for shuffle created\n");
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -1119,7 +1066,7 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 	free(indexes);
 }
 
-// train by all samples at once 
+// Train by all samples at once.
 void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
@@ -1151,14 +1098,9 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	free(output);
 }
 
-struct NetworkEvalResults {
-	//double trainRes;
-	double testRes;
-};
-
-// train by small batch of samples at once, reshuffling after all batches was processed in current cycle
+// Train by small batch of samples at once, reshuffling after all batches was processed in current cycle.
 void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, struct NetworkEvalResults (*netCorrectness)()) {
-	// array of indexes to shuffle examples before each training cycle
+	// Array of indexes to shuffle examples before each training cycle.
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
 		indexes[i] = i;
@@ -1243,180 +1185,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	free(output);
 	free(indexes);
 }
-
-void testXOR() {
-	int maxTrainCycles = 3000;
-	double costFuncToStop = 0.015;
-
-	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
-	printf("\nnetwork created\n");
-
-	double inputs[] = {1, 1};
-	double outputs[] = { 0 };
-
-	double inputs1[] = {1, 0};
-	double outputs1[] = { 1 };
-
-	double inputs2[] = {0, 1};
-	double outputs2[] = { 1 };
-
-	double inputs3[] = {0, 0};
-	double outputs3[] = { 0 };
-
-	double groupInputs[] = {
-				1, 1,
-       				1, 0,
-				0, 1,
-				0, 0
-	};
-	double groupOutputs[] = {
-				0,
-				1,
-				1,
-				0
-	};
-	trainByGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-
-	printf("\ntest xor:\n");
-
-	calculate(*nn, inputs, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs, 1, stdout);
-
-	calculate(*nn, inputs1, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs1, 1, stdout);
-
-	calculate(*nn, inputs2, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs2, 1, stdout);
-
-	calculate(*nn, inputs3, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs3, 1, stdout);
-	printNetworkInFile(*nn);
-/*
-	saveNetwork(*nn, "net.txt");
-	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 2.5, 0);
-	printf("\nLoaded network\n");
-	calculate(*loadedNet, inputs, 0);
-	printNetwork(*loadedNet);
-	costFunction(*loadedNet, outputs, 1, stdout);
-	destroyNetwork(&loadedNet);
-*/
-	destroyNetwork(&nn);
-}
-
-void testOR() {
-	int maxTrainCycles = 1000;
-	double costFuncToStop = 0.015;
-
-	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
-	printf("\nnetwork created\n");
-
-	double inputs[] = {1, 1};
-	double outputs[] = { 1 };
-
-	double inputs1[] = {1, 0};
-	double outputs1[] = { 1 };
-
-	double inputs2[] = {0, 1};
-	double outputs2[] = { 1 };
-
-	double inputs3[] = {0, 0};
-	double outputs3[] = { 0 };
-
-	double groupInputs[] = {
-				1, 1,
-       				1, 0,
-				0, 1,
-				0, 0
-	};
-	double groupOutputs[] = {
-				1,
-				1,
-				1,
-				0
-	};
-	trainByBatchGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, costFuncToStop, maxTrainCycles);
-
-	printf("\ntest or:\n");
-
-	calculate(*nn, inputs, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs, 1, stdout);
-
-	calculate(*nn, inputs1, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs1, 1, stdout);
-
-	calculate(*nn, inputs2, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs2, 1, stdout);
-
-	calculate(*nn, inputs3, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs3, 1, stdout);
-
-	destroyNetwork(&nn);
-}
-
-void testAND() {
-	int maxTrainCycles = 1000;
-
-	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
-	printf("\nnetwork created\n");
-
-	double inputs[] = {1, 1};
-	double outputs[] = { 1 };
-
-	double inputs1[] = {1, 0};
-	double outputs1[] = { 0 };
-
-	double inputs2[] = {0, 1};
-	double outputs2[] = { 0 };
-
-	double inputs3[] = {0, 0};
-	double outputs3[] = { 0 };
-
-	double groupInputs[] = {
-				1, 1,
-       				1, 0,
-				0, 1,
-				0, 0
-	};
-	double groupOutputs[] = {
-				1,
-				0,
-				0,
-				0
-	};
-	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, maxTrainCycles, 2, NULL);
-
-	printf("\ntest and:\n");
-
-	calculate(*nn, inputs, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs, 1, stdout);
-
-	calculate(*nn, inputs1, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs1, 1, stdout);
-
-	calculate(*nn, inputs2, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs2, 1, stdout);
-
-	calculate(*nn, inputs3, 0);
-	printNetwork(*nn);
-	costFunction(*nn, outputs3, 1, stdout);
-
-	destroyNetwork(&nn);
-}
-
+// For MNIST and other type-recognizing things, there one max value in output define result.
 int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, bool isTrain) {
 	int inputSize = nn.inputLayerNeuronsCount;
 	int outputSize = nn.outputLayerNeuronsCount;
@@ -1465,196 +1234,3 @@ double *globalValNetworkTestInputs;
 double *globalValNetworkTestOutputs;
 int globalValNetworkTestExamplesQuantity;
 
-struct NetworkEvalResults evalNetworkByTestDataForFunctionParam() {
-	//int correctAmountTrainData = testNetworkByEvalData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTrainInputs, globalValMNISTTrainOutputs, globalValMNISTTrainExamplesQuantity, true);
-	int correctAmountTestData = testNetworkByEvalData(*globalValNetworkForEvaluationTest, globalValNetworkTestInputs, globalValNetworkTestOutputs, globalValNetworkTestExamplesQuantity, false);
-	struct NetworkEvalResults res;
-	//res.trainRes = ((double)correctAmountTrainData) / globalValNetworkTrainExamplesQuantity;
-	res.testRes = ((double)correctAmountTestData) / globalValNetworkTestExamplesQuantity;
-	return res;
-}
-
-struct MNIST_Data {
-	int dimensionsAmount;
-	int *dimensions;
-	int count;
-	unsigned char *data;
-};
-
-void freeMNIST(struct MNIST_Data mnist) {
-	free(mnist.dimensions);
-	free(mnist.data);
-}
-
-struct MNIST_Data readMNIST(char *fileName) {
-	FILE *file = fopen(fileName, "rb");
-	unsigned char mainInfoBuffer[4];
-	int *dimensions = NULL;
-	int samplesCount;
-	unsigned char *data;
-	fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, file);
-
-	struct MNIST_Data mnist;
-
-	int dimensionsAmount = mainInfoBuffer[3];
-	if(dimensionsAmount > 0) {
-		int dimensionsBufferSize = dimensionsAmount * sizeof(uint32_t);
-		int sampleSize = 1;
-		uint32_t *dimensionsBuffer = malloc(dimensionsBufferSize);
-		uint32_t *allDimensions = malloc(dimensionsBufferSize);
-
-		fread(dimensionsBuffer, dimensionsBufferSize, 1, file);
-		for(int i = 0; i < dimensionsAmount; i++) {
-			// Process big/little endians.
-			allDimensions[i] = __builtin_bswap32(dimensionsBuffer[i]);
-		}
-		samplesCount = allDimensions[0];
-		if(dimensionsAmount > 1) {
-			dimensions = malloc((dimensionsAmount - 1) * sizeof(int));
-			for(int i = 1; i < dimensionsAmount; i++) {
-				dimensions[i - 1] = allDimensions[i];
-				sampleSize *= dimensions[i - 1];
-			}
-		} else {
-			dimensions = malloc(sizeof(int));
-			dimensions[0] = 1;
-		}
-		free(allDimensions);
-		free(dimensionsBuffer);
-
-		int dataSize = sampleSize * samplesCount * sizeof(char);
-		unsigned char *buf = malloc(dataSize);
-		fread(buf, dataSize, 1, file);
-
-		mnist.dimensionsAmount = dimensionsAmount < 2 ? 1 : dimensionsAmount - 1;
-		mnist.dimensions = dimensions;
-		mnist.count = samplesCount;
-		mnist.data = buf;
-/*
-		for(int sample = samplesCount - 10; sample < samplesCount; sample++) {
-			printf("\nsample %d\n", sample);
-			for(int i = 0; i < 784; i++) {
-				printf(" %03d", buf[sample * 784 + i]);
-				if(i % 28 == 27) printf("\n");
-			}
-		}
-*/
-	} else {
-		fclose(file);
-		fprintf(stderr, "wrong mnist file format");
-		exit(1);
-	}
-	fclose(file);
-
-	return mnist;
-}
-
-void testMNIST() {
-	// train data
-	struct MNIST_Data mnistTrainImages = readMNIST("train-images.idx3-ubyte");
-	struct MNIST_Data mnistTrainLabels = readMNIST("train-labels.idx1-ubyte");
-/*
-	for(int sample = 0; sample < 10; sample++) {
-		printf("\nsample %d contain %d\n", sample, mnistTrainLabels.data[sample]);
-		for(int i = 0; i < 784; i++) {
-			printf(" %03d", mnistTrainImages.data[sample * 784 + i]);
-			if(i % 28 == 27) printf("\n");
-		}
-	}
-*/
-
-	double *inputs = malloc(mnistTrainImages.count * 784 * sizeof(double));
-	double *outputs = calloc(mnistTrainLabels.count * 10, sizeof(double));
-	for(int i = 0; i < mnistTrainLabels.count; i++) {
-		outputs[i * 10 + mnistTrainLabels.data[i]] = 1;
-		for(int k = 0; k < 784; k++) {
-			inputs[i * 784 + k] = ((double)mnistTrainImages.data[i * 784 + k]) / 255.0;
-		}
-	}
-	
-	printf("\ntrain inputs set\n");
-
-	// test data
-	struct MNIST_Data mnistTestImages = readMNIST("t10k-images.idx3-ubyte");
-	struct MNIST_Data mnistTestLabels = readMNIST("t10k-labels.idx1-ubyte");
-/*
-	for(int sample = 0; sample < 10; sample++) {
-		printf("\nsample %d contain %d\n", sample, mnistTestLabels.data[sample]);
-		for(int i = 0; i < 784; i++) {
-			printf(" %03d", mnistTestImages.data[sample * 784 + i]);
-			if(i % 28 == 27) printf("\n");
-		}
-	}
-*/
-	double *inputsTest = malloc(mnistTestImages.count * 784 * sizeof(double));
-	double *outputsTest = calloc(mnistTestLabels.count * 10, sizeof(double));
-	for(int i = 0; i < mnistTestLabels.count; i++) {
-		outputsTest[i * 10 + mnistTestLabels.data[i]] = 1;
-		for(int k = 0; k < 784; k++) {
-			inputsTest[i * 784 + k] = ((double)mnistTestImages.data[i * 784 + k]) / 255.0;
-		}
-	}
-
-	printf("\ntest inputs set\n");
-
-	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0, NULL, NULL);
-	printf("\nnetwork created\n");
-
-	int maxTrainCycles = 10;
-
-	globalValNetworkForEvaluationTest = nn;
-	globalValNetworkTestInputs = inputsTest;
-	globalValNetworkTestOutputs = outputsTest;
-	globalValNetworkTestExamplesQuantity = mnistTestImages.count;
-/*
-	globalValNetworkTrainInputs = inputs;
-	globalValNetworkTrainOutputs = mnistTrainLabels.data;
-	globalValNetworkTrainExamplesQuantity = mnistTrainImages.count;
-*/
-//	nn->l2RegularizationParameter = 5.0;
-//	nn->trainSamplesTotalAmount = mnistTrainImages.count;
-//	nn->noImprovementsEpochsLimit = 10;
-//	nn->trainCoeffDecreaserLimit = 0.0625;
-//	nn->trainCoeffCurrentDecreaser = 1.0;
-	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, trainBlockSize, evalNetworkByTestDataForFunctionParam);
-/*
-	saveNetwork(*nn, "net.txt");
-	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 0.5, 0);
-	printf("\nLoaded network\n");
-	int correctAmountTestData = testNetworkByEvalData(*loadedNet, inputsTest, outputsTest, mnistTestImages.count, false);
-	printf("\nCorrect test data: %d\n", correctAmountTestData);
-	destroyNetwork(&loadedNet);
-*/
-	free(inputs);
-	free(outputs);
-	free(inputsTest);
-	free(outputsTest);
-	destroyNetwork(&nn);
-	freeMNIST(mnistTrainImages);
-	freeMNIST(mnistTrainLabels);
-	freeMNIST(mnistTestImages);
-	freeMNIST(mnistTestLabels);
-}
-
-int main() {
-	srandom(time(NULL));
-
-	setupLogs();
-
-	startThreading();
-
-	//testXOR();
-	//testOR();
-	//testAND();
-
-	testMNIST();
-
-	stopThreading();
-
-	closeLogs();
-
-	// Wait for all subthreads to finish, to prevent valgrind from false leaks, but turns out it still gives some false positives on linux.
-	//pthread_exit(NULL);
-	return 0;
-}
