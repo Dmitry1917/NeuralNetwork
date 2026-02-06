@@ -232,10 +232,10 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0, NULL, NULL);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.1, NULL, NULL);
 	printf("\nnetwork created\n");
 
-	int maxTrainCycles = 10;
+	int maxTrainCycles = 30;
 
 	globalValNetworkForEvaluationTest = nn;
 	globalValNetworkTestInputs = inputsTest;
@@ -246,11 +246,11 @@ void testMNIST() {
 	globalValNetworkTrainOutputs = mnistTrainLabels.data;
 	globalValNetworkTrainExamplesQuantity = mnistTrainImages.count;
 */
-//	nn->l2RegularizationParameter = 5.0;
-//	nn->trainSamplesTotalAmount = mnistTrainImages.count;
-//	nn->noImprovementsEpochsLimit = 10;
-//	nn->trainCoeffDecreaserLimit = 0.0625;
-//	nn->trainCoeffCurrentDecreaser = 1.0;
+	nn->l2RegularizationParameter = 2.0;
+	nn->trainSamplesTotalAmount = mnistTrainImages.count;
+	nn->noImprovementsEpochsLimit = 5;
+	nn->trainCoeffDecreaserLimit = 0.0625;
+	nn->trainCoeffCurrentDecreaser = 1.0;
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, trainBlockSize, evalNetworkByTestDataForFunctionParam);
 /*
 	saveNetwork(*nn, "net.txt");
