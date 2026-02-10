@@ -174,12 +174,10 @@ void testAND() {
 	destroyNetwork(&nn);
 }
 
-struct NetworkEvalResults evalNetworkByTestDataForFunctionParam() {
+double evalNetworkByTestDataForFunctionParam() {
 	//int correctAmountTrainData = testNetworkByEvalData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTrainInputs, globalValMNISTTrainOutputs, globalValMNISTTrainExamplesQuantity, true);
 	int correctAmountTestData = testNetworkByEvalData(*globalValNetworkForEvaluationTest, globalValNetworkTestInputs, globalValNetworkTestOutputs, globalValNetworkTestExamplesQuantity, false);
-	struct NetworkEvalResults res;
-	//res.trainRes = ((double)correctAmountTrainData) / globalValNetworkTrainExamplesQuantity;
-	res.testRes = ((double)correctAmountTestData) / globalValNetworkTestExamplesQuantity;
+	double res = ((double)correctAmountTestData) / globalValNetworkTestExamplesQuantity;
 	return res;
 }
 

@@ -76,7 +76,7 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 
 void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles);
 
-void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, struct NetworkEvalResults (*netCorrectness)());
+void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, double (*netCorrectness)());
 
 // Threading.
 void startThreading();

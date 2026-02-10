@@ -15,5 +15,11 @@ nn_net.a: nn_net.o
 nn_net.o: nn_NeuralNetwork.c
 	gcc -c -o $@ $^
 
+dynamic: nn_NeuralNetwork.c
+	gcc -fPIC -shared -o nn_net.so $^
+
 clean:
 	rm -f *.o *.a $(TARGET)
+
+cleanAll:
+	rm -f *.o *.a *.so $(TARGET)

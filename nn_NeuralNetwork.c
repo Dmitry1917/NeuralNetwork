@@ -1099,7 +1099,7 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 }
 
 // Train by small batch of samples at once, reshuffling after all batches was processed in current cycle.
-void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, struct NetworkEvalResults (*netCorrectness)()) {
+void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, double (*netCorrectness)()) {
 	// Array of indexes to shuffle examples before each training cycle.
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -1155,12 +1155,12 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 		printf("\ncycle %d cost function: %f\n", c, cycleCost);
 
 		if(netCorrectness != NULL) {
-			struct NetworkEvalResults correctness = (*netCorrectness)();
+			double correctness = (*netCorrectness)();
 			//printf("\ncorrectness by train data: %f, by test data: %f\n", correctness.trainRes, correctness.testRes);
-			printf("\ncorrectness by test data: %f\n", correctness.testRes);
+			printf("\ncorrectness by test data: %f\n", correctness);
 			if(nn.noImprovementsEpochsLimit > 0) {
-				if(correctness.testRes > lastImprovementCorrectness) {
-					lastImprovementCorrectness = correctness.testRes;
+				if(correctness > lastImprovementCorrectness) {
+					lastImprovementCorrectness = correctness;
 					lastImprovementCycle = c;
 				} else if(c - lastImprovementCycle > nn.noImprovementsEpochsLimit) {
 					if(nn.trainCoeffCurrentDecreaser > nn.trainCoeffDecreaserLimit) {
