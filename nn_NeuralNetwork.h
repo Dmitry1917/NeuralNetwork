@@ -3,6 +3,7 @@
 #include <time.h>
 #include <stdbool.h>
 
+void setupRandom();
 void setupLogs(bool inConsole);
 void closeLogs(); 
 
@@ -49,11 +50,6 @@ struct NeuralNetwork {
 	double *bias;
 	double weightsMomentum;
 	double *weightsVelocities;
-};
-
-struct NetworkEvalResults {
-	//double trainRes;
-	double testRes;
 };
 
 struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases);

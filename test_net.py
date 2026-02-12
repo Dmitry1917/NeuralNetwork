@@ -1,6 +1,6 @@
 import ctypes
 from enum import IntEnum
-#import os
+import matplotlib.pyplot as plt
 
 class cActivationFunctionType(IntEnum):
     sigmoid = 0
@@ -45,12 +45,12 @@ class cNeuralNetwork(ctypes.Structure):
             ('weightsMomentum', ctypes.c_double),
             ('weightsVelocities', ctypes.POINTER(ctypes.c_double))
     ]
-
-class cNetworkEvalResults(ctypes.Structure):
-    _fields_ = [
-            ('testRes', ctypes.c_double)
-    ]
-
+#
+#class cNetworkEvalResults(ctypes.Structure):
+#    _fields_ = [
+#            ('testRes', ctypes.c_double)
+#    ]
+#
 def loadMNIST(fileName):
     file = open(fileName, "rb")
     mainInfoBuffer = file.read(4)
@@ -85,10 +85,15 @@ def vectorized(i, n):
 
 #print(os.environ)
 netLib = ctypes.CDLL('/home/dmitry/Documents/programs/C/nn/nn_net.so')
+
+netLib.setupRandom()
+
 globalValNetworkForEvaluationTest = ctypes.POINTER(cNeuralNetwork).in_dll(netLib, 'globalValNetworkForEvaluationTest')
 globalValNetworkTestInputs = ctypes.POINTER(ctypes.c_double).in_dll(netLib, 'globalValNetworkTestInputs')
 globalValNetworkTestOutputs = ctypes.POINTER(ctypes.c_double).in_dll(netLib, 'globalValNetworkTestOutputs')
 globalValNetworkTestExamplesQuantity = ctypes.c_int.in_dll(netLib, 'globalValNetworkTestExamplesQuantity')
+
+evaluationCorrectResults = []
 
 def evalMNIST():
     correctTests = netLib.testNetworkByEvalData(
@@ -98,6 +103,7 @@ def evalMNIST():
             globalValNetworkTestExamplesQuantity,
             False
     )
+    evaluationCorrectResults.append(correctTests)
     evalResults = correctTests / globalValNetworkTestExamplesQuantity
     return evalResults
 
@@ -164,9 +170,6 @@ testLabelsVectorized = [x for i in range(numberOfTestSamples) for x in vectorize
 #print(testLabelsVectorized[1])
 
 
-#trainData = list(zip(splitedTrainImages, trainLabelsVectorized))
-#testData = list(zip(splitedTestImages, testLabelsVectorized))
-
 arrType = ctypes.c_double * (784 * numberOfTrainSamples)
 trainInputs = arrType(*normalizedTrainImages)
 
@@ -178,18 +181,157 @@ testInputs = arrType(*normalizedTestImages)
 arrType = ctypes.c_double * (784 * numberOfTestSamples)
 testResults = arrType(*testLabelsVectorized)
 
-trainBlockSize = 10
-maxTrainCycles = 10
-net = netLib.createNetwork(784, 10, 1, 30, trainBlockSize, cActivationFunctionType.sigmoid, cActivationFunctionType.sigmoid, cCostFunctionType.crossEntropy, ctypes.c_double(0.5), ctypes.c_double(0.0), None, None)
+#trainBlockSize = 10
+#maxTrainCycles = 30
 
-globalValNetworkForEvaluationTest = net
-globalValNetworkTestInputs = testInputs
-globalValNetworkTestOutputs = testResults
-globalValNetworkTestExamplesQuantity = numberOfTestSamples
-# Turn out it is bug, that existed more than 15 years - only simple types can be returned in callback functions.
+# Turn out it is bug, that existed more than 15 years - only simple types can be returned in callback functions. Forced to change C interface.
 cFuncPointerType = ctypes.CFUNCTYPE(ctypes.c_double)#ctypes.CFUNCTYPE(cNetworkEvalResults)
 evalFuncPointer = cFuncPointerType(evalMNIST)
 
-netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
+#net = netLib.createNetwork(784, 10, 1, 30, trainBlockSize, cActivationFunctionType.sigmoid, cActivationFunctionType.sigmoid, cCostFunctionType.crossEntropy, ctypes.c_double(0.5), ctypes.c_double(0.1), None, None)
+#
+#net.contents.l2RegularizationParameter = 2.0
+#net.contents.trainSamplesTotalAmount = numberOfTrainSamples
+#net.contents.noImprovementsEpochsLimit = 5
+#net.contents.trainCoeffDecreaserLimit = 0.0625
+#net.contents.trainCoeffCurrentDecreaser = 1.0
+#
+#globalValNetworkForEvaluationTest = net
+#globalValNetworkTestInputs = testInputs
+#globalValNetworkTestOutputs = testResults
+#globalValNetworkTestExamplesQuantity = numberOfTestSamples
+#
+#netLib.startThreading()
+#netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
+#netLib.stopThreading()
+#
+#netLib.destroyNetwork(ctypes.byref(net))
+#
+#print(evaluationCorrectResults)
+#
+#plt.figure(figsize=(10, 5))
+#epochs = list(range(len(evaluationCorrectResults)))
+#plt.plot(epochs, evaluationCorrectResults, marker = 'o')
+#plt.xlabel('Epochs')
+#plt.ylabel('Correct MNIST')
+#
+#for i, res in enumerate(evaluationCorrectResults):
+#    plt.annotate(f'{i} {res}',
+#                 (epochs[i], evaluationCorrectResults[i]),
+#                 fontsize=4,
+#                 textcoords='offset points',
+#                 xytext=(0, 5),
+#                 ha='center')
+#
+#plt.savefig(f'MNIST{evaluationCorrectResults[0]}', dpi=300)
 
-netLib.destroyNetwork(ctypes.byref(net))
+globalValNetworkTestInputs = testInputs
+globalValNetworkTestOutputs = testResults
+globalValNetworkTestExamplesQuantity = numberOfTestSamples
+
+testAmount = 10
+
+def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, weightMomentum, l2RP, nIEL, tCDL, fileName):
+    plt.figure(figsize=(10, 5 * testAmount), num=1, clear=True)
+
+    for testIndex in range(testAmount):
+        global evaluationCorrectResults
+        evaluationCorrectResults = []
+
+        net = netLib.createNetwork(784, 10, hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, ctypes.c_double(startingLearningRate), ctypes.c_double(weightMomentum), None, None)
+
+        net.contents.l2RegularizationParameter = l2RP
+        net.contents.trainSamplesTotalAmount = numberOfTrainSamples
+        net.contents.noImprovementsEpochsLimit = nIEL
+        net.contents.trainCoeffDecreaserLimit = tCDL
+
+        global globalValNetworkForEvaluationTest
+        globalValNetworkForEvaluationTest = net
+    
+        netLib.startThreading()
+        netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
+        netLib.stopThreading()
+        
+        netLib.destroyNetwork(ctypes.byref(net))
+        
+        #print(evaluationCorrectResults)
+        
+        epochs = list(range(len(evaluationCorrectResults)))
+    
+        plt.subplot(testAmount, 1, testIndex + 1)
+        plt.plot(epochs, evaluationCorrectResults, marker = 'o')
+        plt.title(f'{testIndex}')
+        plt.xlabel('Epochs')
+        plt.ylabel('Correct MNIST')
+        
+        for i, res in enumerate(evaluationCorrectResults):
+            plt.annotate(f'{i} {res}',
+                         (epochs[i], evaluationCorrectResults[i]),
+                         fontsize=4,
+                         textcoords='offset points',
+                         xytext=(0, 5),
+                         ha='center')
+
+    plt.suptitle(f'hiddenLayers={hiddenLayers}, neuronsPerHiddenLayer={neuronsPerHiddenLayer},\ntrainBlockSize={trainBlockSize}, maxTrainCycles={maxTrainCycles},\naftHidden={aftHidden}, aftOutput={aftOutput}, cft={cft}, startingLearningRate={startingLearningRate}, weightMomentum={weightMomentum},\nl2RP={l2RP}, nIEL={nIEL}, tCDL={tCDL}')
+    plt.savefig(fileName, dpi=300)
+
+#
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        trainBlockSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.square,
+#        startingLearningRate = 2.5,
+#        weightMomentum = 0,
+#        l2RP = 0,
+#        nIEL = 0,
+#        tCDL = 0,
+#        fileName = 'MNIST_sigmoid_square_simplest')
+#
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        trainBlockSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.crossEntropy,
+#        startingLearningRate = 0.5,
+#        weightMomentum = 0,
+#        l2RP = 0,
+#        nIEL = 0,
+#        tCDL = 0,
+#        fileName = 'MNIST_sigmoid_crossEntropy_simplest')
+
+testMNIST(
+        hiddenLayers = 1,
+        neuronsPerHiddenLayer = 30,
+        trainBlockSize = 10,
+        maxTrainCycles = 30,
+        aftHidden = cActivationFunctionType.sigmoid,
+        aftOutput = cActivationFunctionType.sigmoid,
+        cft = cCostFunctionType.square,
+        startingLearningRate = 2.5,
+        weightMomentum = 0,
+        l2RP = 0,
+        nIEL = 5,
+        tCDL = 0.0625,
+        fileName = 'MNIST_sigmoid_square_nIEL_5')
+
+testMNIST(
+        hiddenLayers = 1,
+        neuronsPerHiddenLayer = 30,
+        trainBlockSize = 10,
+        maxTrainCycles = 30,
+        aftHidden = cActivationFunctionType.sigmoid,
+        aftOutput = cActivationFunctionType.sigmoid,
+        cft = cCostFunctionType.crossEntropy,
+        startingLearningRate = 0.5,
+        weightMomentum = 0,
+        l2RP = 0,
+        nIEL = 5,
+        tCDL = 0.0625,
+        fileName = 'MNIST_sigmoid_crossEntropy_nIEL_5')

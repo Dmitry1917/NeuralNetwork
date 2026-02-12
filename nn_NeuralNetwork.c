@@ -8,6 +8,10 @@
 FILE *logsFile = NULL;
 bool useThreading = false;
 
+void setupRandom() {
+	srandom(time(NULL));
+}
+
 // Logging.
 void setupLogs(bool inConsole) {
 	if(inConsole) logsFile = stdout;
