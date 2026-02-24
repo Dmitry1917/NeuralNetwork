@@ -4,6 +4,8 @@
 #include <math.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <time.h>
+#include <stdlib.h>
 
 FILE *logsFile = NULL;
 bool useThreading = false;
@@ -22,7 +24,7 @@ void closeLogs() {
 	if(logsFile != NULL) fclose(logsFile);
 }
 
-// Random Gauss distribution by Box-Muller transform. randomGauss below is final function to use.
+// Random Gauss distribution by Box-Muller transform. Function randomGauss below is one to use.
 double randomUniformForBoxMullerMethod() {// Return value in (0;1], semiopen interval.
 	return ((double)random() + 1.0) / (RAND_MAX + 1.0);
 }
@@ -110,7 +112,7 @@ enum CostFunctionType stringToCFT(char* str) {
 	return square;
 }
 
-// Neuron activation function, based on its own inputs, thus softmax, that use all neurons in current layer, to calculate each of its output, can't be done here.
+// Neuron activation function, based on its own inputs, thus softmax, that use all neurons in current layer to calculate each of its output, can't be done here.
 double activation(double propagation, enum ActivationFunctionType aft) {
 	switch(aft) {
 		case sigmoid:
@@ -518,6 +520,34 @@ void *processActivationQueue3(void *args) {
 	}
 }
 
+void startThreading() {
+	// Detached threads free memory after cancel.
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, 1);
+
+	sem_init(&sem1, 0, 0);
+	sem_init(&sem2, 0, 0);
+	sem_init(&sem3, 0, 0);
+	pthread_create(&thread1, &attr, processActivationQueue1, NULL);
+	pthread_create(&thread2, &attr, processActivationQueue2, NULL);
+	pthread_create(&thread3, &attr, processActivationQueue3, NULL);
+	pthread_attr_destroy(&attr);
+
+	useThreading = true;
+}
+
+void stopThreading() {
+	useThreading = false;
+
+	pthread_cancel(thread1);
+	pthread_cancel(thread2);
+	pthread_cancel(thread3);
+	sem_destroy(&sem1);
+	sem_destroy(&sem2);
+	sem_destroy(&sem3);
+}
+
 // Feedforward data to network. resIndex parameter show index of sample in mini batch, to save results properly for future use during learning.
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	/*if(resIndex < 0) {
@@ -536,7 +566,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
 
 	struct ProcessActivationData data1, data2, data3;
-	// 0 below means first hidden layer.
+	// 0 below means first hidden layer, and hiddenLayersCount included means outer layer.
 	for(int layer = 0; layer <= nn.hiddenLayersCount; layer++) {
 		int weightsNumber = layer == 0 ? nn.inputLayerNeuronsCount : nn.neuronsPerHiddenLayer;
 		enum ActivationFunctionType aft = layer == nn.hiddenLayersCount ? nn.net[nn.neuronsCount - 1].aft : nn.net[nn.inputLayerNeuronsCount].aft;
@@ -981,34 +1011,6 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	}
 }
 
-void startThreading() {
-	// Detached threads free memory after cancel.
-	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, 1);
-
-	sem_init(&sem1, 0, 0);
-	sem_init(&sem2, 0, 0);
-	sem_init(&sem3, 0, 0);
-	pthread_create(&thread1, &attr, processActivationQueue1, NULL);
-	pthread_create(&thread2, &attr, processActivationQueue2, NULL);
-	pthread_create(&thread3, &attr, processActivationQueue3, NULL);
-	pthread_attr_destroy(&attr);
-
-	useThreading = true;
-}
-
-void stopThreading() {
-	useThreading = false;
-
-	pthread_cancel(thread1);
-	pthread_cancel(thread2);
-	pthread_cancel(thread3);
-	sem_destroy(&sem1);
-	sem_destroy(&sem2);
-	sem_destroy(&sem3);
-}
-
 // Used in simple gradient descent below.
 void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycles) {
 	for(int i = 0; i < maxCycles; i++) {
@@ -1189,6 +1191,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	free(output);
 	free(indexes);
 }
+
 // For MNIST and other type-recognizing things, there one max value in output define result.
 int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, bool isTrain) {
 	int inputSize = nn.inputLayerNeuronsCount;
@@ -1227,14 +1230,4 @@ int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outpu
 
 	return correctCounter;
 }
-
-struct NeuralNetwork *globalValNetworkForEvaluationTest;
-/*
-double *globalValNetworkTrainInputs;
-unsigned char *globalValNetworkTrainOutputs;
-int globalValNetworkTrainExamplesQuantity;
-*/
-double *globalValNetworkTestInputs;
-double *globalValNetworkTestOutputs;
-int globalValNetworkTestExamplesQuantity;
 

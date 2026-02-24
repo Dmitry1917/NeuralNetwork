@@ -1,6 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
 #include <stdbool.h>
 
 void setupRandom();
@@ -77,17 +75,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 // Threading.
 void startThreading();
 void stopThreading();
-
-// For net evaluation.
-extern struct NeuralNetwork *globalValNetworkForEvaluationTest;
-/*
-double *globalValNetworkTrainInputs;
-unsigned char *globalValNetworkTrainOutputs;
-int globalValNetworkTrainExamplesQuantity;
-*/
-extern double *globalValNetworkTestInputs;
-extern double *globalValNetworkTestOutputs;
-extern int globalValNetworkTestExamplesQuantity;
 
 // For MNIST and other type-recognizing things, there one max value in output define result.
 int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, bool isTrain);

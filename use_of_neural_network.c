@@ -1,5 +1,6 @@
 #include "nn_NeuralNetwork.h"
 #include "MNIST.h"
+#include <stdlib.h>
 
 void testXOR() {
 	int maxTrainCycles = 3000;
@@ -174,8 +175,13 @@ void testAND() {
 	destroyNetwork(&nn);
 }
 
+// Global values for network test during mini batch SGD.
+struct NeuralNetwork *globalValNetworkForEvaluationTest;
+double *globalValNetworkTestInputs;
+double *globalValNetworkTestOutputs;
+int globalValNetworkTestExamplesQuantity;
+
 double evalNetworkByTestDataForFunctionParam() {
-	//int correctAmountTrainData = testNetworkByEvalData(*globalValNetworkForMNISTSpecialTest, globalValMNISTTrainInputs, globalValMNISTTrainOutputs, globalValMNISTTrainExamplesQuantity, true);
 	int correctAmountTestData = testNetworkByEvalData(*globalValNetworkForEvaluationTest, globalValNetworkTestInputs, globalValNetworkTestOutputs, globalValNetworkTestExamplesQuantity, false);
 	double res = ((double)correctAmountTestData) / globalValNetworkTestExamplesQuantity;
 	return res;
@@ -270,8 +276,7 @@ void testMNIST() {
 }
 
 int main() {
-	srandom(time(NULL));
-
+	setupRandom();
 	//setupLogs(false);
 
 	startThreading();
