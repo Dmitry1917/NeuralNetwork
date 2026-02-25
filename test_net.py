@@ -43,7 +43,8 @@ class cNeuralNetwork(ctypes.Structure):
             ('weights', ctypes.POINTER(ctypes.c_double)),
             ('bias', ctypes.POINTER(ctypes.c_double)),
             ('weightsMomentum', ctypes.c_double),
-            ('weightsVelocities', ctypes.POINTER(ctypes.c_double))
+            ('weightsVelocities', ctypes.POINTER(ctypes.c_double)),
+            ('biasVelocities', ctypes.POINTER(ctypes.c_double))
     ]
 
 def loadMNIST(fileName):
@@ -148,6 +149,8 @@ testInputs = arrType(*normalizedTestImages)
 arrType = ctypes.c_double * (10 * numberOfTestSamples)
 testResults = arrType(*testLabelsVectorized)
 
+print("Loaded MNIST")
+
 # Turned out there is bug, that existed more than 15 years - only simple types can be returned in callback functions, thus you can not just return struct. Decided to change C interface.
 cFuncPointerType = ctypes.CFUNCTYPE(ctypes.c_double)#ctypes.CFUNCTYPE(cNetworkEvalResults)
 evalFuncPointer = cFuncPointerType(evalMNIST)
@@ -188,6 +191,8 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
         netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
         netLib.stopThreading()
         
+        #netLib.printNetworkInFile(net.contents, fileName.encode('utf-8'))
+
         netLib.destroyNetwork(ctypes.byref(net))
         
         #print(evaluationCorrectResults)
@@ -199,7 +204,7 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
         plt.title(f'{testIndex}')
         plt.xlabel('Epochs')
         plt.ylabel('Correct MNIST')
-        
+
         for i, res in enumerate(evaluationCorrectResults):
             plt.annotate(f'{i} {res}',
                          (epochs[i], evaluationCorrectResults[i]),

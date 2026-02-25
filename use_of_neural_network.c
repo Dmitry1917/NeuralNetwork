@@ -6,7 +6,7 @@ void testXOR() {
 	int maxTrainCycles = 3000;
 	double costFuncToStop = 0.015;
 
-	int trainBlockSize = 4;
+	int trainBlockSize = 1;
 	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
@@ -53,7 +53,7 @@ void testXOR() {
 	calculate(*nn, inputs3, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
-	printNetworkInFile(*nn);
+	printNetworkInFile(*nn, "xorNet.txt");
 /*
 	saveNetwork(*nn, "net.txt");
 	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 2.5, 0);
@@ -124,7 +124,7 @@ void testOR() {
 void testAND() {
 	int maxTrainCycles = 1000;
 
-	int trainBlockSize = 4;
+	int trainBlockSize = 2;
 	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
@@ -152,7 +152,7 @@ void testAND() {
 				0,
 				0
 	};
-	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, maxTrainCycles, 2, NULL);
+	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, maxTrainCycles, trainBlockSize, NULL);
 
 	printf("\ntest and:\n");
 

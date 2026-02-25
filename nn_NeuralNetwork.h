@@ -48,6 +48,7 @@ struct NeuralNetwork {
 	double *bias;
 	double weightsMomentum;
 	double *weightsVelocities;
+	double *biasVelocities;
 };
 
 struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases);
@@ -62,7 +63,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex);
 
 void printNetwork(struct NeuralNetwork nn);
 
-void printNetworkInFile(struct NeuralNetwork nn);
+void printNetworkInFile(struct NeuralNetwork nn, char *fileName);
 
 double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samplesCount, FILE *logsOutput);
 

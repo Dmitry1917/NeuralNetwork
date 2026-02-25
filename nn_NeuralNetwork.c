@@ -194,6 +194,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->weightsMomentum = weightsMomentum;
 	if(weightsMomentum > 0) {
 		nn->weightsVelocities = calloc(weightsNumber, sizeof(double));
+		nn->biasVelocities = calloc(biasNumber, sizeof(double));
 	}
 	// input layer
 	for(int i = 0; i < inputLayerNeuronsCount; i++) {
@@ -267,7 +268,10 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	free((**nn).deltasData);
 	free((**nn).weights);
 	free((**nn).bias);
-	if((**nn).weightsMomentum > 0) free((**nn).weightsVelocities);
+	if((**nn).weightsMomentum > 0) {
+		free((**nn).weightsVelocities);
+		free((**nn).biasVelocities);
+	}
 	free(*nn);
 	*nn = NULL;
 }
@@ -716,8 +720,8 @@ void printNetwork(struct NeuralNetwork nn) {
 }
 
 // Can be used for any network and print batch results too.
-void printNetworkInFile(struct NeuralNetwork nn) {
-	if(logsFile == NULL) return;
+void printNetworkInExistingFILE(struct NeuralNetwork nn, FILE *file) {
+	if(file == NULL) return;
 	int maxLevel = nn.inputLayerNeuronsCount;
 	if(nn.outputLayerNeuronsCount > maxLevel) maxLevel = nn.outputLayerNeuronsCount;
 	if(nn.neuronsPerHiddenLayer > maxLevel) maxLevel = nn.neuronsPerHiddenLayer;
@@ -727,12 +731,12 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 	while(level < maxLevel) {
 		struct Neuron n = nn.net[i];
 		if(n.layer == 0) {
-			fprintf(logsFile, "\nneuron ");
+			fprintf(file, "\nneuron ");
 			for(int r = 0; r < nn.trainBlockSize; r++) {
-				fprintf(logsFile, "res%d: %.4f ", r, nn.resData[nn.neuronsCount * r + i]);
+				fprintf(file, "res%d: %.4f ", r, nn.resData[nn.neuronsCount * r + i]);
 			}
 		} else {
-			fprintf(logsFile, "neuron layer %d index %d weights: ", n.layer, n.index);
+			fprintf(file, "neuron layer %d index %d weights: ", n.layer, n.index);
 			int firstWeightIndex;
 			if(n.layer == 1) {
 				firstWeightIndex = nn.inputLayerNeuronsCount * n.index;
@@ -740,16 +744,16 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 				firstWeightIndex = nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (n.layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + n.index * nn.neuronsPerHiddenLayer;
 			}
 			for(int w = 0; w < n.weightsCount; w++) {
-				fprintf(logsFile, "%.4f ", nn.weights[firstWeightIndex + w]);
+				fprintf(file, "%.4f ", nn.weights[firstWeightIndex + w]);
 			}
-			fprintf(logsFile, "bias: %.4f ", nn.bias[i - nn.inputLayerNeuronsCount]);
+			fprintf(file, "bias: %.4f ", nn.bias[i - nn.inputLayerNeuronsCount]);
 			//printf("%d %d %d", i, xCoord, n.weightsCount);
 			for(int r = 0; r < nn.trainBlockSize; r++) {
-				fprintf(logsFile, "res%d: %.4f delta%d: %.3f ", r, nn.resData[nn.neuronsCount * r + i], r, nn.deltasData[nn.neuronsCount * r + i]);
+				fprintf(file, "res%d: %.4f delta%d: %.3f ", r, nn.resData[nn.neuronsCount * r + i], r, nn.deltasData[nn.neuronsCount * r + i]);
 			}
 		}
 
-		fprintf(logsFile, "     ");
+		fprintf(file, "     ");
 
 		if(i < nn.inputLayerNeuronsCount) {
 			if(level < nn.neuronsPerHiddenLayer) {
@@ -768,13 +772,22 @@ void printNetworkInFile(struct NeuralNetwork nn) {
 
 		if(i >= nn.neuronsCount) {
 			level++;
-			fprintf(logsFile, "\n");
+			fprintf(file, "\n");
 			// find first layer with enough neurons
 			if(level < nn.inputLayerNeuronsCount) i = level;
 			else if(level < nn.neuronsPerHiddenLayer) i = level + nn.inputLayerNeuronsCount;
 			else i = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * nn.hiddenLayersCount + level;
 		}
 	}
+}
+
+void printNetworkInFile(struct NeuralNetwork nn, char *fileName) {
+	FILE *file = fopen(fileName, "a");
+	if(file == NULL) return;
+
+	fprintf(file, "\n\nNext network.\n\n");
+	printNetworkInExistingFILE(nn, file);
+	fclose(file);
 }
 
 #define nanPreventionLimit 0.001
@@ -977,6 +990,7 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 			double *weight = nn.weights + weightsFirstIndex;
 			double *velocities = nn.weightsVelocities + weightsFirstIndex;
 			double *bias = nn.bias + neuronTotalIndex - nn.inputLayerNeuronsCount;
+			double *biasVelocities = nn.biasVelocities + neuronTotalIndex - nn.inputLayerNeuronsCount;
 			double sumOfDeltas = 0;
 			double *resultsOfPreviousLayer = nn.resData + previousLayerFirstIndex;//It's content is sigma in formulas.
 
@@ -998,7 +1012,12 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 				int trainBlockShift = nn.neuronsCount * block;
 				sumOfDeltas += nn.deltasData[trainBlockShift + neuronTotalIndex];
 			}
-			*bias -= trainCoeff * sumOfDeltas * trainBlockCoeff;
+			double biasVelocity = -trainCoeff * sumOfDeltas * trainBlockCoeff;
+			if(nn.weightsMomentum > 0) {
+				biasVelocity += nn.weightsMomentum * (*biasVelocities);
+				(*biasVelocities) = biasVelocity;
+			}
+			*bias += biasVelocity;
 		}
 
 		// Set info for next layer, therefore do it in the layer before last for neurons count;
@@ -1016,7 +1035,6 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycl
 	for(int i = 0; i < maxCycles; i++) {
 		calculate(nn, inputs, 0);
 
-		//printNetworkInFile(nn);
 		calculateDeltas(nn, outputs, 0);
 
 		updateWeights(nn, 1);
@@ -1061,7 +1079,6 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 			double cost = costFunction(nn, output, 1, i % 10000 == 0 ? logsFile : NULL);
 			cycleCost += cost;
 		}
-		//printNetworkInFile(nn);
 		cycleCost /= examplesQuantity;
 		printf("\ncycleCost %f\n", cycleCost);
 		if(cycleCost < costFunctionToStop) break;
@@ -1089,7 +1106,7 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 			calculate(nn, input, i);
 			calculateDeltas(nn, output, i);
 		}
-		printNetworkInFile(nn);
+		printNetworkInExistingFILE(nn, logsFile);
 
 		double cost = costFunction(nn, outputs, examplesQuantity, logsFile);
 		if(cost < costFunctionToStop) {
@@ -1154,7 +1171,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 			double batchCost = costFunction(nn, batchOutputs, samplesCount, logsFile);
 			cycleCost += batchCost;
 		}
-		//printNetworkInFile(nn);
 
 		cycleCost /= totalInternalCycles;
 		if(logsFile != NULL) fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
