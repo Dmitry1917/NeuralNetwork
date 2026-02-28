@@ -1217,7 +1217,6 @@ int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outpu
 		double *input = inputs + inputSize * i;
 		calculate(nn, input, 0);
 
-		int lastLayerFirstIndex = nn.inputLayerNeuronsCount + nn.hiddenLayersCount * nn.neuronsPerHiddenLayer;
 		double maxRes = -1;
 		int maxResIndex = 0;
 
@@ -1234,7 +1233,7 @@ int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outpu
 		maxRes = -1;
 		maxResIndex = 0;
 		for(int k = 0; k < outputSize; k++) {
-			double res = nn.resData[lastLayerFirstIndex + k];
+			double res = nn.resData[nn.lastLayerFirstIndex + k];
 			if(res > maxRes) {
 				maxRes = res;
 				maxResIndex = k;

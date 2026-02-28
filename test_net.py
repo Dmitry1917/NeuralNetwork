@@ -37,12 +37,12 @@ class cNeuralNetwork(ctypes.Structure):
             ('noImprovementsEpochsLimit', ctypes.c_int),
             ('trainCoeffCurrentDecreaser', ctypes.c_double),
             ('trainCoeffDecreaserLimit', ctypes.c_double),
+            ('weightsMomentum', ctypes.c_double),
             ('lastLayerFirstIndex', ctypes.c_int),
             ('resData', ctypes.POINTER(ctypes.c_double)),
             ('deltasData', ctypes.POINTER(ctypes.c_double)),
             ('weights', ctypes.POINTER(ctypes.c_double)),
             ('bias', ctypes.POINTER(ctypes.c_double)),
-            ('weightsMomentum', ctypes.c_double),
             ('weightsVelocities', ctypes.POINTER(ctypes.c_double)),
             ('biasVelocities', ctypes.POINTER(ctypes.c_double))
     ]
