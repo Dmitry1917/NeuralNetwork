@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-// Just call srandom() to ensure unique initial weights for networks between application sessions. If for some reason you need the same network created repeatedly during different program launches - dont call it.
+// Just calls srandom() to ensure unique initial weights for networks between application sessions. If for some reason you need the same network created repeatedly during different program launches - dont call it.
 void setupRandom();
 
 // Use extensive logging during training process, file nn_logs.txt will be created, if inConsole is false. For heavy debug purposes only.
@@ -21,7 +21,7 @@ enum CostFunctionType {
 	logLikehood// Only use with softmax output layer. In fact it is actually crossEntropy for softmax activation function.
 };
 
-// Originally, much of the data was inside neurons themselves, but during optimizations it was moved in arrays like resData in NeuralNetwork struct below. Now its purpose is faster access to precalculated data, that often used during training.
+// Originally, much of the data was inside neurons themselves, but during optimizations it was moved in arrays like resData in NeuralNetwork struct below. Now Neuron structs purpose is faster access to precalculated data, that is used often during training.
 struct Neuron {
 	int layer;
 	int index;
@@ -39,14 +39,16 @@ struct NeuralNetwork {
 	int neuronsPerHiddenLayer;
 	enum CostFunctionType cft;
 	int trainBlockSize;// Batch size during training. Must be known during network creation to allocate enough memory for training data.
-	double baseTrainCoeff;// Initial multiplicator of gradient during training (learning rate). Can be reduced if no improvement for too long - depend on settings below.
+	double baseTrainCoeff;// Initial multiplicator of gradient during training (learning rate). Can be reduced if no improvement for too long - depends on settings below.
+
 	// Must be set manually after network creation, if you want to use these optimizations.
 	double l2RegularizationParameter;
 	int trainSamplesTotalAmount;// Used together with previous one for L2 regularization.
 	int noImprovementsEpochsLimit;// If no improvement on test data during more than this amount of cycles - reduce learning rate by half.
-	double trainCoeffCurrentDecreaser;// Multiplier for baseTrainCoeff, that is actually decreased then necessary.
-	double trainCoeffDecreaserLimit;// Minimum for value above..
+	double trainCoeffCurrentDecreaser;// Multiplier for baseTrainCoeff, that is what actually decreased then necessary.
+	double trainCoeffDecreaserLimit;// Minimum for value above.
 	double weightsMomentum;
+
 	// Below are just internal data for training and optimizations.
 	int lastLayerFirstIndex;// For optimizations, to not calculate every time it's needed.
 	double *resData;// Results of neurons calculated for each block in batch, they go like this: allResults_block1, allResults_block2 ... allResults_block_last
@@ -61,6 +63,7 @@ struct NeuralNetwork {
 // Network creation function. Most arguments explained in struct above. aftHidden - activation function type for hidden layers, aftOutput - for output one. loadedWeights and loadedBiases are used in loadNetwork function below, to set saved net info - only use if you REALLY know, what you are doing.
 struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases);
 
+// Free memory, used for network.
 void destroyNetwork(struct NeuralNetwork **nn);
 
 void saveNetwork(struct NeuralNetwork nn, char *fileName);
@@ -86,4 +89,4 @@ void startThreading();
 void stopThreading();
 
 // For MNIST and other type-recognizing things, there one max value in output define result.
-int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, bool isTrain);
+int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity);

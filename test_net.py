@@ -79,7 +79,7 @@ netLib = ctypes.CDLL('/home/dmitry/Documents/programs/C/nn/nn_net.so')
 
 netLib.createNetwork.restype = ctypes.POINTER(cNeuralNetwork)
 netLib.testNetworkByEvalData.restype = ctypes.c_int
-netLib.testNetworkByEvalData.argtypes = [cNeuralNetwork, ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.c_int, ctypes.c_bool]
+netLib.testNetworkByEvalData.argtypes = [cNeuralNetwork, ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.c_int]
 
 netLib.setupRandom()
 
@@ -90,8 +90,7 @@ def evalMNIST():
             globalValNetworkForEvaluationTest.contents,
             globalValNetworkTestInputs,
             globalValNetworkTestOutputs,
-            globalValNetworkTestExamplesQuantity,
-            False
+            globalValNetworkTestExamplesQuantity
     )
     evaluationCorrectResults.append(correctTests)
     evalResults = correctTests / globalValNetworkTestExamplesQuantity
@@ -169,7 +168,7 @@ globalValNetworkTestExamplesQuantity = numberOfTestSamples
 
 testAmount = 10
 
-def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, weightMomentum, l2RP, nIEL, tCDL, fileName):
+def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, weightMomentum, l2RP, nIEL, tCDL, fileName, threading=True):
     # Prepare reusable image to draw results into.
     plt.figure(figsize=(10, 5 * testAmount), num=1, clear=True)
 
@@ -187,9 +186,11 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
         global globalValNetworkForEvaluationTest
         globalValNetworkForEvaluationTest = net
     
-        netLib.startThreading()
+        if threading:
+            netLib.startThreading()
         netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
-        netLib.stopThreading()
+        if threading:
+            netLib.stopThreading()
         
         #netLib.printNetworkInFile(net.contents, fileName.encode('utf-8'))
 
@@ -213,7 +214,7 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
                          xytext=(0, 5),
                          ha='center')
 
-    plt.suptitle(f'hiddenLayers={hiddenLayers}, neuronsPerHiddenLayer={neuronsPerHiddenLayer},\ntrainBlockSize={trainBlockSize}, maxTrainCycles={maxTrainCycles},\naftHidden={aftHidden}, aftOutput={aftOutput}, cft={cft}, startingLearningRate={startingLearningRate}, weightMomentum={weightMomentum},\nl2RP={l2RP}, nIEL={nIEL}, tCDL={tCDL}')
+    plt.suptitle(f'hiddenLayers={hiddenLayers}, neuronsPerHiddenLayer={neuronsPerHiddenLayer},\ntrainBlockSize={trainBlockSize}, maxTrainCycles={maxTrainCycles},\naftHidden={aftHidden}, aftOutput={aftOutput}, cft={cft}, startingLearningRate={startingLearningRate}, weightMomentum={weightMomentum},\nl2RP={l2RP}, nIEL={nIEL}, tCDL={tCDL}, threading={threading}')
     plt.savefig(fileName, dpi=300)
 
 #
@@ -321,21 +322,21 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
 #        nIEL = 5,
 #        tCDL = 0.0625,
 #        fileName = 'MNIST_sigmoid_square_nIEL_5_l2RP_1_wm_01')
-#
-#testMNIST(
-#        hiddenLayers = 1,
-#        neuronsPerHiddenLayer = 30,
-#        trainBlockSize = 10,
-#        maxTrainCycles = 30,
-#        aftHidden = cActivationFunctionType.sigmoid,
-#        aftOutput = cActivationFunctionType.sigmoid,
-#        cft = cCostFunctionType.crossEntropy,
-#        startingLearningRate = 0.5,
-#        weightMomentum = 0.1,
-#        l2RP = 1.0,
-#        nIEL = 5,
-#        tCDL = 0.0625,
-#        fileName = 'MNIST_sigmoid_crossEntropy_nIEL_5_l2RP_1_wm_01')
+
+testMNIST(
+        hiddenLayers = 1,
+        neuronsPerHiddenLayer = 30,
+        trainBlockSize = 10,
+        maxTrainCycles = 30,
+        aftHidden = cActivationFunctionType.sigmoid,
+        aftOutput = cActivationFunctionType.sigmoid,
+        cft = cCostFunctionType.crossEntropy,
+        startingLearningRate = 0.5,
+        weightMomentum = 0.1,
+        l2RP = 1.0,
+        nIEL = 5,
+        tCDL = 0.0625,
+        fileName = 'MNIST_sigmoid_crossEntropy_nIEL_5_l2RP_1_wm_01')
 
 #testMNIST(
 #        hiddenLayers = 1,

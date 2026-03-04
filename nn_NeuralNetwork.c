@@ -41,7 +41,7 @@ double randomGauss(double mean, double deviation) {
 
 // Used for training samples shuffling, to improve neural network learning.
 void shuffle(int* array, int length) {
-	if(length < 1) return;
+	if(length < 2) return;
 	for(int i = 0; i < length; i++) {
 		int index = rand() % length;
 		int element = array[i];
@@ -790,7 +790,7 @@ void printNetworkInFile(struct NeuralNetwork nn, char *fileName) {
 	fclose(file);
 }
 
-#define nanPreventionLimit 0.001
+#define nanPreventionLimit 0.0001
 double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samplesCount, FILE *logsOutput) {
 	/*if(samplesCount < 1) {
 		fprintf(stderr, "\ntrainSize < 1\n");
@@ -825,7 +825,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			}
 			break;
 		case logLikehood:
-			// This can be used only with activation functions, that lead to final results resembling probability distribution and desired results being 0 and 1 only.
+			// This can be used only with activation functions, that leads to final results resembling probability distribution and desired results being 0 and 1 only.
 			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
 				double sampleCost = 0;
 				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
@@ -833,6 +833,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 					// Prevent floating point comparison issues again.
 					if(desired > 0.999) {
 						double real = nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i];
+						if(real < nanPreventionLimit) real = nanPreventionLimit;
 						sampleCost = -log(real);
 						break;
 					}
@@ -931,7 +932,7 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 	}
 
 	// Start with last weight, to go backwards during calculations, using next layer neurons.
-	// In case of perceptron (no hidden layers) link below will be incorrect, but it will not be used anyway, because function will end by for condition.
+	// In case of perceptron (no hidden layers) pointer below will be incorrect, but it will not be used anyway, because function will end by for condition.
 	double *nextLayerLastWeight = nn.weights + nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount - 1;
 	double *nextLayerLastWeightForCurrentNeuron = nextLayerLastWeight;
 	for(; i >= nn.inputLayerNeuronsCount; i--) {
@@ -939,7 +940,7 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 
 		int indexInLayer = n->index;
 
-		// look and sum next layer neuron deltas, multiplied by weights
+		// Look up and sum next layer neuron deltas, multiplied by weights.
 		int nextLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * n->layer;
 
 		int nextLayerNeuronsCount;
@@ -1209,7 +1210,7 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 }
 
 // For MNIST and other type-recognizing things, there one max value in output define result.
-int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, bool isTrain) {
+int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity) {
 	int inputSize = nn.inputLayerNeuronsCount;
 	int outputSize = nn.outputLayerNeuronsCount;
 	int correctCounter = 0;
@@ -1241,7 +1242,7 @@ int testNetworkByEvalData(struct NeuralNetwork nn, double *inputs, double *outpu
 		}
 		if(maxResIndex == correctResIndex) correctCounter++;
 	}
-	printf("\nEvaluation, correct data: %d/%d, is this training data %b\n", correctCounter, examplesQuantity, isTrain);
+	printf("\nEvaluation, correct data: %d/%d\n", correctCounter, examplesQuantity);
 
 	return correctCounter;
 }

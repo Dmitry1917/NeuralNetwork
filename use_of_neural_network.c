@@ -182,7 +182,7 @@ double *globalValNetworkTestOutputs;
 int globalValNetworkTestExamplesQuantity;
 
 double evalNetworkByTestDataForFunctionParam() {
-	int correctAmountTestData = testNetworkByEvalData(*globalValNetworkForEvaluationTest, globalValNetworkTestInputs, globalValNetworkTestOutputs, globalValNetworkTestExamplesQuantity, false);
+	int correctAmountTestData = testNetworkByEvalData(*globalValNetworkForEvaluationTest, globalValNetworkTestInputs, globalValNetworkTestOutputs, globalValNetworkTestExamplesQuantity);
 	double res = ((double)correctAmountTestData) / globalValNetworkTestExamplesQuantity;
 	return res;
 }
@@ -260,7 +260,7 @@ void testMNIST() {
 	saveNetwork(*nn, "net.txt");
 	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 0.5, 0);
 	printf("\nLoaded network\n");
-	int correctAmountTestData = testNetworkByEvalData(*loadedNet, inputsTest, outputsTest, mnistTestImages.count, false);
+	int correctAmountTestData = testNetworkByEvalData(*loadedNet, inputsTest, outputsTest, mnistTestImages.count);
 	printf("\nCorrect test data: %d\n", correctAmountTestData);
 	destroyNetwork(&loadedNet);
 */
