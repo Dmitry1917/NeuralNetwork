@@ -7,6 +7,8 @@ File **use_of_neural_network.c** contains examples of network usage for XOR, OR,
 
 File **test_net.py** do MNIST recognition by using neural network library from Python. It has several versions of training with different parameters and draw results graphs at the end **(commented at the end of file - all together work quite long)**.
 
+Both files also contain very primitive example of autoencoder usage.
+
 Files MNIST.h and MNIST.c has functions for reading MNIST db (used in C examples, mentioned above).
 
 In its current state neural network can be created with any amount of layers and neurons as long as memory allows.
@@ -15,6 +17,7 @@ Supported neuron activation functions:
 - sigmoid;
 - tanh;
 - ReLU;
+- linear;
 - softmax.
 
 Softmax can be used only in output layer and together with log likehood cost function.
@@ -34,7 +37,10 @@ Network learning can be done by:
 The last one is considered main option and supports additional optimizations, such as changing learning rate if network don't improve for too long.
 
 Common optional optimizations:
+- L1 regularization;
 - L2 regularization;
-- weights momentum.
+- weight decay (separated from L2, like in AdamW optimizer in PyTorch, but unlike it, applied at the final stage of weight update, not the first one);
+- weights momentum;
+- Adam optimizer.
 
 Network feedforward can be executed in 4 threads for performance **(see startThreading/stopThreading function)**.

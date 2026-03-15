@@ -12,6 +12,7 @@ enum ActivationFunctionType {
 	sigmoid,
 	tanhyp,
 	ReLU,
+	linear,
 	softmax// Output layer only, with logLikehood cost function.
 };
 
@@ -42,41 +43,55 @@ struct NeuralNetwork {
 	double baseTrainCoeff;// Initial multiplicator of gradient during training (learning rate). Can be reduced if no improvement for too long - depends on settings below.
 
 	// Must be set manually after network creation, if you want to use these optimizations.
+	double l1RegularizationParameter;
 	double l2RegularizationParameter;
-	int trainSamplesTotalAmount;// Used together with previous one for L2 regularization.
+	double decoupledWeightDecay;// In reality weight decay and l2 regularization are actually different, that was explained clearly in https://arxiv.org/abs/1711.05101 and used for example in PyTorch for AdamW optimization leading to internal flag decoupled_weight_decay. Here both can be used at the same time, but not recommended, unless you are really sure, that improvements can be achieved.
 	int noImprovementsEpochsLimit;// If no improvement on test data during more than this amount of cycles - reduce learning rate by half.
 	double trainCoeffCurrentDecreaser;// Multiplier for baseTrainCoeff, that is what actually decreased then necessary.
 	double trainCoeffDecreaserLimit;// Minimum for value above.
-	double weightsMomentum;
+
+	// Values for Adam optimizer. beta1 can also be used separately as weights momentum.
+	double beta1;// Weights momentum. Decay of gradients moving average.
+	double beta2;// Decay of gradients squares moving average.
+	double eps;// Constant to avoid devision to zero.
+	bool biasCorrectionInAdamOptimizer;
 
 	// Below are just internal data for training and optimizations.
 	int lastLayerFirstIndex;// For optimizations, to not calculate every time it's needed.
+	int weightsNumber;
+	int biasesNumber;
 	double *resData;// Results of neurons calculated for each block in batch, they go like this: allResults_block1, allResults_block2 ... allResults_block_last
 	double *deltasData;// Deltas, calculated during backpropagation for each block in batch. Same order as results above.
 	double *weights;
-	double *bias;
+	double *biases;
+	int* iterationsOfWeightsUpdatesDone;
 	// Last velocities for weights and biases to use with momentum.
-	double *weightsVelocities;
-	double *biasVelocities;
+	double *weightsGradientsMovingAverages;
+	double *biasesGradientsMovingAverages;
+	double *weightsGradientSquaresMovingAverages;
+	double *biasesGradientSquaresMovingAverages;
 };
 
 // Network creation function. Most arguments explained in struct above. aftHidden - activation function type for hidden layers, aftOutput - for output one. loadedWeights and loadedBiases are used in loadNetwork function below, to set saved net info - only use if you REALLY know, what you are doing.
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases);
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double beta1, double beta2, double eps, double *loadedWeights, double *loadedBiases);
 
 // Free memory, used for network.
 void destroyNetwork(struct NeuralNetwork **nn);
 
+// Set Adam optimization buffers back to zero.
+void clearOptimizationsBuffers(struct NeuralNetwork nn);
+
 void saveNetwork(struct NeuralNetwork nn, char *fileName);
 // Load network from file, created by previous function. Last parameters are for training only and thefore are not saved.
-struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double weightMomentum);
+struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double beta1, double beta2, double eps);
 
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex);// Feedforward network. resIndex - index in the current batch, used to choose saving area in memory for results.
 
 void printNetwork(struct NeuralNetwork nn);// Print network in console - only proper for very small nets.
 
-void printNetworkInFile(struct NeuralNetwork nn, char *fileName);// Can be used for any network, unlike previous function.
+void printNetworkInFile(struct NeuralNetwork nn, char *fileName, bool appending);// Can be used for any network, unlike previous function.
 
-double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samplesCount, FILE *logsOutput);// Calculate cost function for last calculated batch results. desiredOutputs - expected results for every batch in order (first all in first batch, then all for second etc). samplesCount - batchSize. logsOutput - file to log results and desirables for this calculation.
+double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int batchSize, FILE *logsOutput);// Calculate cost function for last calculated batch results. desiredOutputs - expected results for every batch in order (first all in first batch, then all for second etc). samplesCount - batchSize. logsOutput - file to log results and desirables for this calculation.
 
 void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles);// Just train by one sample at the time, until do all of them in shuffled order, then repeat the cycle using new shuffle.
 

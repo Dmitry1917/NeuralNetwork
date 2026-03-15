@@ -10,6 +10,10 @@
 FILE *logsFile = NULL;
 bool useThreading = false;
 
+double sign(double x) {
+	return (x > 0) - (x < 0);
+}
+
 void setupRandom() {
 	srandom(time(NULL));
 }
@@ -79,6 +83,8 @@ char* aftToString(enum ActivationFunctionType aft) {
 			return "tanhyp";
 		case ReLU:
 			return "ReLU";
+		case linear:
+			return "linear";
 		case softmax:
 			return "softmax";
 	}
@@ -88,6 +94,7 @@ enum ActivationFunctionType stringToAFT(char* str) {
 	if(strcmp(str, "sigmoid") == 0) return sigmoid;
 	if(strcmp(str, "tanhyp") == 0) return tanhyp;
 	if(strcmp(str, "ReLU") == 0) return ReLU;
+	if(strcmp(str, "linear") == 0) return linear;
 	if(strcmp(str, "softmax") == 0) return softmax;
 	printf("\nUnknown activation function type %s\n, returning standart sigmoid as fallback", str);
 	return sigmoid;
@@ -123,6 +130,8 @@ double activation(double propagation, enum ActivationFunctionType aft) {
 			return (eInX - eInMinusX) / (eInX + eInMinusX);
 		case ReLU:
 			return propagation < 0 ? 0 : propagation;
+		case linear:
+			return propagation;
 		case softmax:
 			printf("\nNot supposed use softmax here.\n");
 			exit(1);
@@ -137,6 +146,8 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 			return 1 - lastRes * lastRes;
 		case ReLU:
 			return lastRes <= 0 ? 0 : 1;
+		case linear:
+			return 1;
 		case softmax:
 			printf("\nNot supposed use softmax here.\n");
 			exit(1);
@@ -144,7 +155,7 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 }
 
 // Used for creating new network or loading saved one, by additionally providing weights and biases.
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double weightsMomentum, double *loadedWeights, double *loadedBiases) {
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double beta1, double beta2, double eps, double *loadedWeights, double *loadedBiases) {
 	// Softmax can be only in the last layer.
 	if(aftHidden == softmax) {
 		printf("\nSoftmax can be only in the last layer.\n");
@@ -163,8 +174,9 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->lastLayerFirstIndex = neuronsCount - outputLayerNeuronsCount;
 	nn->cft = cft;
 	nn->baseTrainCoeff = baseTrainCoeff;
+	nn->l1RegularizationParameter = 0;
 	nn->l2RegularizationParameter = 0;
-	nn->trainSamplesTotalAmount = 0;
+	nn->decoupledWeightDecay = 0;
 	nn->noImprovementsEpochsLimit = 0;
 	nn->trainCoeffCurrentDecreaser = 1;
 	nn->trainCoeffDecreaserLimit = 1;
@@ -184,17 +196,33 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	} else {
 		nn->weights = loadedWeights;
 	}
-	int biasNumber = neuronsCount - inputLayerNeuronsCount;
+	int biasesNumber = neuronsCount - inputLayerNeuronsCount;
 	if(loadedBiases == NULL) {
-		nn->bias = malloc(biasNumber * sizeof(double));
+		nn->biases = malloc(biasesNumber * sizeof(double));
 	} else {
-		nn->bias = loadedBiases;
+		nn->biases = loadedBiases;
 	}
 
-	nn->weightsMomentum = weightsMomentum;
-	if(weightsMomentum > 0) {
-		nn->weightsVelocities = calloc(weightsNumber, sizeof(double));
-		nn->biasVelocities = calloc(biasNumber, sizeof(double));
+	nn->weightsNumber = weightsNumber;
+	nn->biasesNumber = biasesNumber;
+
+	nn->beta1 = beta1;
+	nn->beta2 = beta2;
+	nn->eps = eps;
+	nn->biasCorrectionInAdamOptimizer = false;
+
+	nn->iterationsOfWeightsUpdatesDone = calloc(1, sizeof(int));
+	nn->weightsGradientsMovingAverages = NULL;
+	nn->biasesGradientsMovingAverages = NULL;
+	nn->weightsGradientSquaresMovingAverages = NULL;
+	nn->biasesGradientSquaresMovingAverages = NULL;
+	if(beta1 > 0) {
+		nn->weightsGradientsMovingAverages = calloc(weightsNumber, sizeof(double));
+		nn->biasesGradientsMovingAverages = calloc(biasesNumber, sizeof(double));
+		if(beta2 > 0 && eps > 0) {
+			nn->weightsGradientSquaresMovingAverages = calloc(weightsNumber, sizeof(double));
+			nn->biasesGradientSquaresMovingAverages = calloc(biasesNumber, sizeof(double));
+		}
 	}
 	// input layer
 	for(int i = 0; i < inputLayerNeuronsCount; i++) {
@@ -231,7 +259,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 			}
 			if(loadedBiases == NULL) {
 				double bias = randomGauss(0, 1);
-				nn->bias[il - inputLayerNeuronsCount] = bias;
+				nn->biases[il - inputLayerNeuronsCount] = bias;
 			}
 		}
 	}
@@ -255,7 +283,7 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 		}
 		if(loadedBiases == NULL) {
 			double bias = randomGauss(0, 1);
-			nn->bias[il - inputLayerNeuronsCount] = bias;
+			nn->biases[il - inputLayerNeuronsCount] = bias;
 		}
 	}
 
@@ -267,13 +295,34 @@ void destroyNetwork(struct NeuralNetwork **nn) {
 	free((**nn).resData);
 	free((**nn).deltasData);
 	free((**nn).weights);
-	free((**nn).bias);
-	if((**nn).weightsMomentum > 0) {
-		free((**nn).weightsVelocities);
-		free((**nn).biasVelocities);
+	free((**nn).biases);
+	free((**nn).iterationsOfWeightsUpdatesDone);
+	if((**nn).beta1 > 0) {
+		free((**nn).weightsGradientsMovingAverages);
+		free((**nn).biasesGradientsMovingAverages);
+		if((**nn).beta2 > 0 && (**nn).eps > 0) {
+			free((**nn).weightsGradientSquaresMovingAverages);
+			free((**nn).biasesGradientSquaresMovingAverages);
+		}
 	}
 	free(*nn);
 	*nn = NULL;
+}
+
+void clearOptimizationsBuffers(struct NeuralNetwork nn) {
+	nn.iterationsOfWeightsUpdatesDone[0] = 0;
+	if(nn.weightsGradientsMovingAverages != NULL) {
+		memset(nn.weightsGradientsMovingAverages, 0, nn.weightsNumber * sizeof(double));
+	}
+	if(nn.biasesGradientsMovingAverages != NULL) {
+		memset(nn.biasesGradientsMovingAverages, 0, nn.biasesNumber * sizeof(double));
+	}
+	if(nn.weightsGradientSquaresMovingAverages != NULL) {
+		memset(nn.weightsGradientSquaresMovingAverages, 0, nn.weightsNumber * sizeof(double));
+	}
+	if(nn.biasesGradientSquaresMovingAverages = NULL) {
+		memset(nn.biasesGradientSquaresMovingAverages, 0, nn.biasesNumber * sizeof(double));
+	}
 }
 
 // Simple save and load, without optimizations or proper error handling.
@@ -331,7 +380,7 @@ void saveNetwork(struct NeuralNetwork nn, char *fileName) {
 	}
 	fputs("Biases:\n", file);
 	for(int i = 0; i < biasNumber; i++) {
-		snprintf(buf, sizeof(buf), "%.17f\n", nn.bias[i]);
+		snprintf(buf, sizeof(buf), "%.17f\n", nn.biases[i]);
 		if(fputs(buf, file) == EOF) {
 			printf("Could not write bias %s to %s\n", buf, fileName);
 		}
@@ -339,7 +388,7 @@ void saveNetwork(struct NeuralNetwork nn, char *fileName) {
 	fclose(file);
 }
 
-struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double weightMomentum) {
+struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double beta1, double beta2, double eps) {
 	FILE *file = fopen(fileName, "r");
 	if(file == NULL) {
 		printf("Could not open file %s for read.\n", fileName);
@@ -423,17 +472,17 @@ struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double bas
 	}
 	int neuronsCount = inputLayerNeuronsCount + outputLayerNeuronsCount + hiddenLayersCount * neuronsPerHiddenLayer;
 	int biasesNumber = neuronsCount - inputLayerNeuronsCount;
-	double *bias = malloc((biasesNumber) * sizeof(double));
+	double *biases = malloc((biasesNumber) * sizeof(double));
 	for(int i = 0; i < biasesNumber; i++) {
 		if(fgets(buf, sizeof(buf), file) != NULL) {
-			double biasI = strtod(buf, NULL);
-			bias[i] = biasI;
+			double bias = strtod(buf, NULL);
+			biases[i] = bias;
 			//printf("bias %d is %f\n", i, biasI);
 		}
 	}
 	fclose(file);
 
-	struct NeuralNetwork *nn = createNetwork(inputLayerNeuronsCount, outputLayerNeuronsCount, hiddenLayersCount, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, baseTrainCoeff, weightMomentum, weights, bias);
+	struct NeuralNetwork *nn = createNetwork(inputLayerNeuronsCount, outputLayerNeuronsCount, hiddenLayersCount, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, baseTrainCoeff, beta1, beta2, eps, weights, biases);
 	return nn;
 }
 
@@ -443,7 +492,7 @@ struct ProcessActivationData {
 	int weightsNumber;
 	double *prevLayerResults;
 	double *weights;
-	double *bias;
+	double *biases;
 	double *resData;
 	int neuronsCount;
 };
@@ -460,13 +509,13 @@ void *processActivationQueue1(void *args) {
 		//usleep(1);// For valgrind - otherwise it takes too long to check.
 		if(pad1) {
 			double *weights = pad1->weights;
-			double *bias = pad1->bias;
+			double *biases = pad1->biases;
 			double *resData = pad1->resData;
 			for(int i = 0; i < pad1->neuronsCount; i++) {
 				double propagation = dotProduct(weights, pad1->prevLayerResults, pad1->weightsNumber);
-				propagation += *bias;
+				propagation += *biases;
 				weights += pad1->weightsNumber;
-				bias++;
+				biases++;
 				*resData = activation(propagation, pad1->aft);
 				resData++;
 			}
@@ -484,13 +533,13 @@ void *processActivationQueue2(void *args) {
 		//usleep(1);// For valgrind - otherwise it takes too long to check.
 		if(pad2) {
 			double *weights = pad2->weights;
-			double *bias = pad2->bias;
+			double *biases = pad2->biases;
 			double *resData = pad2->resData;
 			for(int i = 0; i < pad2->neuronsCount; i++) {
 				double propagation = dotProduct(weights, pad2->prevLayerResults, pad2->weightsNumber);
-				propagation += *bias;
+				propagation += *biases;
 				weights += pad2->weightsNumber;
-				bias++;
+				biases++;
 				*resData = activation(propagation, pad2->aft);
 				resData++;
 			}
@@ -508,13 +557,13 @@ void *processActivationQueue3(void *args) {
 		//usleep(1);// For valgrind - otherwise it takes too long to check.
 		if(pad3) {
 			double *weights = pad3->weights;
-			double *bias = pad3->bias;
+			double *biases = pad3->biases;
 			double *resData = pad3->resData;
 			for(int i = 0; i < pad3->neuronsCount; i++) {
 				double propagation = dotProduct(weights, pad3->prevLayerResults, pad3->weightsNumber);
-				propagation += *bias;
+				propagation += *biases;
 				weights += pad3->weightsNumber;
-				bias++;
+				biases++;
 				*resData = activation(propagation, pad3->aft);
 				resData++;
 			}
@@ -565,7 +614,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 
 	// First hidden layer.
 	double *weights = nn.weights;
-	double *bias = nn.bias;
+	double *biases = nn.biases;
 	double *prevLayerRes = nn.resData + resIndexShift;
 	double *resData = prevLayerRes + nn.inputLayerNeuronsCount;
 
@@ -584,7 +633,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			data1.aft = aft;
 			data1.prevLayerResults = prevLayerRes;
 			data1.weights = weights;
-			data1.bias = bias;
+			data1.biases = biases;
 			data1.resData = resData;
 			data1.neuronsCount = neuronsCount / 4;
 		
@@ -592,7 +641,7 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			data2.aft = aft;
 			data2.prevLayerResults = prevLayerRes;
 			data2.weights = weights + data1.neuronsCount * weightsNumber;
-			data2.bias = bias + data1.neuronsCount;
+			data2.biases = biases + data1.neuronsCount;
 			data2.resData = resData + data1.neuronsCount;
 			data2.neuronsCount = data1.neuronsCount;
 		
@@ -600,13 +649,13 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			data3.aft = aft;
 			data3.prevLayerResults = prevLayerRes;
 			data3.weights = weights + 2 * data1.neuronsCount * weightsNumber;
-			data3.bias = bias + 2 * data1.neuronsCount;
+			data3.biases = biases + 2 * data1.neuronsCount;
 			data3.resData = resData + 2 * data1.neuronsCount;
 			data3.neuronsCount = data1.neuronsCount;
 		
 			previousNeurons = 3 * data1.neuronsCount;
 			weights += previousNeurons * weightsNumber;
-			bias += previousNeurons;
+			biases += previousNeurons;
 			resData += previousNeurons;
 		
 			pad1 = &data1;
@@ -618,12 +667,12 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			double expSum = 0;
 			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 				double propagation = dotProduct(weights, prevLayerRes, nn.neuronsPerHiddenLayer);
-				propagation += *bias;
+				propagation += *biases;
 				double exponent = exp(propagation);
 				exponents[i] = exponent;
 				expSum += exponent;
 				weights += nn.neuronsPerHiddenLayer;
-				bias++;
+				biases++;
 			}
 			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 				*resData = exponents[i] / expSum;
@@ -633,9 +682,9 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 		} else {
 			for(int i = previousNeurons; i < neuronsCount; i++) {
 				double propagation = dotProduct(weights, prevLayerRes, weightsNumber);
-				propagation += *bias;
+				propagation += *biases;
 				weights += weightsNumber;
-				bias++;
+				biases++;
 				*resData = activation(propagation, aft);
 				resData++;
 			}
@@ -663,7 +712,7 @@ void printNetwork(struct NeuralNetwork nn) {
 	int lastLayer = -1;
 	int lastEolXCoord = 0;
 	double *weights = nn.weights;
-	double *bias = nn.bias;
+	double *biases = nn.biases;
 	for(int i = 0; i < nn.neuronsCount; i++) {
 		struct Neuron n = nn.net[i];
 		int layer = 0;
@@ -703,8 +752,8 @@ void printNetwork(struct NeuralNetwork nn) {
 				printf("%.4f ", *weights);
 				weights++;
 			}
-			printf("%.4f ", *bias);
-			bias++;
+			printf("%.4f ", *biases);
+			biases++;
 			//printf("%d %d %d", i, xCoord, n.weightsCount);
 			printf("%.4f %.3f", nn.resData[i], nn.deltasData[i]);
 
@@ -746,7 +795,7 @@ void printNetworkInExistingFILE(struct NeuralNetwork nn, FILE *file) {
 			for(int w = 0; w < n.weightsCount; w++) {
 				fprintf(file, "%.4f ", nn.weights[firstWeightIndex + w]);
 			}
-			fprintf(file, "bias: %.4f ", nn.bias[i - nn.inputLayerNeuronsCount]);
+			fprintf(file, "bias: %.4f ", nn.biases[i - nn.inputLayerNeuronsCount]);
 			//printf("%d %d %d", i, xCoord, n.weightsCount);
 			for(int r = 0; r < nn.trainBlockSize; r++) {
 				fprintf(file, "res%d: %.4f delta%d: %.3f ", r, nn.resData[nn.neuronsCount * r + i], r, nn.deltasData[nn.neuronsCount * r + i]);
@@ -781,17 +830,17 @@ void printNetworkInExistingFILE(struct NeuralNetwork nn, FILE *file) {
 	}
 }
 
-void printNetworkInFile(struct NeuralNetwork nn, char *fileName) {
-	FILE *file = fopen(fileName, "a");
+void printNetworkInFile(struct NeuralNetwork nn, char *fileName, bool appending) {
+	FILE *file = fopen(fileName, appending ? "a" : "w");
 	if(file == NULL) return;
 
-	fprintf(file, "\n\nNext network.\n\n");
+	if(appending) fprintf(file, "\n\nNext network.\n\n");
 	printNetworkInExistingFILE(nn, file);
 	fclose(file);
 }
 
 #define nanPreventionLimit 0.0001
-double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samplesCount, FILE *logsOutput) {
+double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int batchSize, FILE *logsOutput) {
 	/*if(samplesCount < 1) {
 		fprintf(stderr, "\ntrainSize < 1\n");
 		exit(1);
@@ -800,7 +849,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 
 	switch(nn.cft) {
 		case square:
-			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
+			for(int resIndex = 0; resIndex < batchSize; resIndex++) {
 				double sampleCost = 0;
 				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 					sampleCost += pow(nn.resData[nn.neuronsCount * resIndex + nn.lastLayerFirstIndex + i] - desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i], 2);
@@ -809,7 +858,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			}
 			break;
 		case crossEntropy:
-			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
+			for(int resIndex = 0; resIndex < batchSize; resIndex++) {
 				double sampleCost = 0;
 				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 					// Intentionaly written very detailed for easier understanding. Performance here isn't noticably affected.
@@ -826,7 +875,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			break;
 		case logLikehood:
 			// This can be used only with activation functions, that leads to final results resembling probability distribution and desired results being 0 and 1 only.
-			for(int resIndex = 0; resIndex < samplesCount; resIndex++) {
+			for(int resIndex = 0; resIndex < batchSize; resIndex++) {
 				double sampleCost = 0;
 				for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 					double desired = desiredOutputs[nn.outputLayerNeuronsCount * resIndex + i];
@@ -848,8 +897,24 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 	}
 
 	// In all cases, there only part of samples is used, it will be later summed and divided by number of groups of samples, and that will made it like dividing all costs on all samples, like intended. To be completely fair - if total samples amount is not divisible on mini batch size, then there will be some error, but in all real cases (many samples, limited mini batch) it will be minor and inconsequential, because cost is used only for some control, not in calculations themselfs.
-	cost /= samplesCount;
+	cost /= batchSize;
 
+	// L1 regularization.
+	if(nn.l1RegularizationParameter > 0) {
+		int weightsCount;
+		if(nn.hiddenLayersCount > 0) {
+			weightsCount = nn.inputLayerNeuronsCount * nn.neuronsPerHiddenLayer + (nn.hiddenLayersCount - 1) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer + nn.neuronsPerHiddenLayer * nn.outputLayerNeuronsCount;
+		} else {// perceptron
+			weightsCount = nn.inputLayerNeuronsCount * nn.outputLayerNeuronsCount;
+		}
+		double weightsAbsSum = 0;
+		double *weights = nn.weights;
+		for(int i = 0; i < weightsCount; i++) {
+			weightsAbsSum += fabs(*weights);
+			weights++;
+		}
+		cost += nn.l1RegularizationParameter * weightsAbsSum;
+	}
 	// L2 regularization.
 	if(nn.l2RegularizationParameter > 0) {
 		int weightsCount;
@@ -864,7 +929,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 			weightsSquaresSum += *weights * *weights;
 			weights++;
 		}
-		cost += nn.l2RegularizationParameter * weightsSquaresSum * 0.5 / nn.trainSamplesTotalAmount;
+		cost += nn.l2RegularizationParameter * weightsSquaresSum * 0.5;
 	}
 
 	if(logsOutput != NULL) {
@@ -877,7 +942,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 		}*/
 	
 		fprintf(logsOutput, "\nresults:");
-		for(int block = 0; block < samplesCount; block++) {
+		for(int block = 0; block < batchSize; block++) {
 			fprintf(logsOutput, "\n    results%d:", block);
 			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 				fprintf(logsOutput, " %f", nn.resData[nn.neuronsCount * block + nn.lastLayerFirstIndex + i]);
@@ -885,7 +950,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int samples
 		}
 	
 		fprintf(logsOutput, "\nwe need:");//text like this to make desired results right under real ones
-		for(int block = 0; block < samplesCount; block++) {
+		for(int block = 0; block < batchSize; block++) {
 			fprintf(logsOutput, "\n    we need%d:", block);
 			for(int i = 0; i < nn.outputLayerNeuronsCount; i++) {
 				fprintf(logsOutput, " %f", desiredOutputs[nn.outputLayerNeuronsCount * block + i]);
@@ -975,9 +1040,15 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 	}*/
 	double trainCoeff = nn.baseTrainCoeff * nn.trainCoeffCurrentDecreaser;
 	double trainBlockCoeff = 1.0 / trainBlockSize;
-	double invertedSamplesNumber = 1.0;
-	if(nn.trainSamplesTotalAmount > 0) invertedSamplesNumber = 1.0 / nn.trainSamplesTotalAmount;
-	double l2RegularizationReducedBySamplesNumber = nn.l2RegularizationParameter * invertedSamplesNumber;
+
+	nn.iterationsOfWeightsUpdatesDone[0]++;// It must start from 1 to avoid division by zero.
+	double adamOptimizerBeta1BiasCorrection = 1.0;
+	double adamOptimizerBeta2BiasCorrection = 1.0;
+
+	if(nn.beta1 > 0 && nn.beta2 > 0 && nn.eps > 0 && nn.biasCorrectionInAdamOptimizer) {// Adam optimizer.
+		adamOptimizerBeta1BiasCorrection = 1.0 / (1 - pow(nn.beta1, nn.iterationsOfWeightsUpdatesDone[0]));
+		adamOptimizerBeta2BiasCorrection = 1.0 / (1 - pow(nn.beta2, nn.iterationsOfWeightsUpdatesDone[0]));
+	}
 
 	int previousLayerFirstIndex = 0;
 	int previousLayerNeuronsCount = nn.inputLayerNeuronsCount;
@@ -989,9 +1060,11 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 			int weightsFirstIndex = index * previousLayerNeuronsCount + !firstHidden * (nn.neuronsPerHiddenLayer * nn.inputLayerNeuronsCount + (layer - 2) * nn.neuronsPerHiddenLayer * nn.neuronsPerHiddenLayer);
 
 			double *weight = nn.weights + weightsFirstIndex;
-			double *velocities = nn.weightsVelocities + weightsFirstIndex;
-			double *bias = nn.bias + neuronTotalIndex - nn.inputLayerNeuronsCount;
-			double *biasVelocities = nn.biasVelocities + neuronTotalIndex - nn.inputLayerNeuronsCount;
+			double *weightsGradientsMovingAverages = nn.weightsGradientsMovingAverages + weightsFirstIndex;
+			double *weightsGradientSquaresMovingAverages = nn.weightsGradientSquaresMovingAverages + weightsFirstIndex;
+			double *biases = nn.biases + neuronTotalIndex - nn.inputLayerNeuronsCount;
+			double *biasesGradientsMovingAverages = nn.biasesGradientsMovingAverages + neuronTotalIndex - nn.inputLayerNeuronsCount;
+			double *biasesGradientSquaresMovingAverages = nn.biasesGradientSquaresMovingAverages + neuronTotalIndex - nn.inputLayerNeuronsCount;
 			double sumOfDeltas = 0;
 			double *resultsOfPreviousLayer = nn.resData + previousLayerFirstIndex;//It's content is sigma in formulas.
 
@@ -1001,24 +1074,59 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 					int trainBlockShift = nn.neuronsCount * block;
 					sumOfWeightDeltas += (*(resultsOfPreviousLayer + trainBlockShift)) * nn.deltasData[trainBlockShift + neuronTotalIndex];// This multiplication is gradient of weight.
 				}
-				double velocity = -trainCoeff * (sumOfWeightDeltas * trainBlockCoeff + l2RegularizationReducedBySamplesNumber * weight[k]);
-				if(nn.weightsMomentum > 0) {
-					velocity += nn.weightsMomentum * velocities[k];
-					velocities[k] = velocity;
+				double l1RegularizationValue = 0;
+				if(nn.l1RegularizationParameter > 0) {
+					// L1 regularization should not push weight over zero, only to it - thefore, if weight is already too small - its module will be used instead of parameter.
+					l1RegularizationValue = fmin(nn.l1RegularizationParameter, fabs(weight[k])) * sign(weight[k]);
 				}
-				weight[k] += velocity;
+				double weightGradient = sumOfWeightDeltas * trainBlockCoeff + nn.l2RegularizationParameter * weight[k] + l1RegularizationValue;
+				double weightGradientMovingAverage = weightGradient;
+				if(nn.beta1 > 0) {
+					weightGradientMovingAverage = nn.beta1 * weightsGradientsMovingAverages[k] + (1 - nn.beta1) * weightGradient;
+					weightsGradientsMovingAverages[k] = weightGradientMovingAverage;
+				}
+				if(nn.beta1 > 0 && nn.beta2 > 0 && nn.eps > 0) {// Adam optimizer.
+					double weightsGradientSquaresMovingAverage = nn.beta2 * weightsGradientSquaresMovingAverages[k] + (1 - nn.beta2) * weightGradient * weightGradient;
+					weightsGradientSquaresMovingAverages[k] = weightsGradientSquaresMovingAverage;
+					// Bias correction stage.
+					double wgmaCorrected = weightGradientMovingAverage;
+					double wgsmaCorrected = weightsGradientSquaresMovingAverage;
+					if(nn.biasCorrectionInAdamOptimizer) {
+						wgmaCorrected *= adamOptimizerBeta1BiasCorrection;
+						wgsmaCorrected *= adamOptimizerBeta2BiasCorrection;
+					}
+					weight[k] -= trainCoeff * (wgmaCorrected / (sqrt(wgsmaCorrected) + nn.eps) + nn.decoupledWeightDecay * weight[k]);
+				}
+				else {// Weights momentum only or even without it.
+					weight[k] -= trainCoeff * (weightGradientMovingAverage + nn.decoupledWeightDecay * weight[k]);
+				}
 				resultsOfPreviousLayer++;
 			}
 			for(int block = 0; block < trainBlockSize; block++) {
 				int trainBlockShift = nn.neuronsCount * block;
 				sumOfDeltas += nn.deltasData[trainBlockShift + neuronTotalIndex];
 			}
-			double biasVelocity = -trainCoeff * sumOfDeltas * trainBlockCoeff;
-			if(nn.weightsMomentum > 0) {
-				biasVelocity += nn.weightsMomentum * (*biasVelocities);
-				(*biasVelocities) = biasVelocity;
+			double biasGradient = sumOfDeltas * trainBlockCoeff;
+			double biasGradientMovingAverage = biasGradient;
+			if(nn.beta1 > 0) {
+				biasGradientMovingAverage = nn.beta1 * (*biasesGradientsMovingAverages) + (1 - nn.beta1) * biasGradientMovingAverage;
+				(*biasesGradientsMovingAverages) = biasGradientMovingAverage;
 			}
-			*bias += biasVelocity;
+			if(nn.beta1 > 0 && nn.beta2 > 0 && nn.eps > 0) {// Adam optimizer.
+				double biasGradientSquaresMovingAverage = nn.beta2 * (*biasesGradientSquaresMovingAverages) + (1 - nn.beta2) * biasGradient * biasGradient;
+				(*biasesGradientSquaresMovingAverages) = biasGradientSquaresMovingAverage;
+				// Bias correction stage.
+				double bgmaCorrected = biasGradientMovingAverage;
+				double bgsmaCorrected = biasGradientSquaresMovingAverage;
+				if(nn.biasCorrectionInAdamOptimizer) {
+					bgmaCorrected *= adamOptimizerBeta1BiasCorrection;
+					bgsmaCorrected *= adamOptimizerBeta2BiasCorrection;
+				}
+				*biases -= trainCoeff * (bgmaCorrected / (sqrt(bgsmaCorrected) + nn.eps) + nn.decoupledWeightDecay * (*biases));
+			}
+			else {// Weights momentum only or even without it.
+				*biases -= trainCoeff * (biasGradientMovingAverage + nn.decoupledWeightDecay * (*biases));
+			}
 		}
 
 		// Set info for next layer, therefore do it in the layer before last for neurons count;
@@ -1134,8 +1242,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	int lastBatchSize = examplesQuantity % batchSize;
 	int totalInternalCycles = internalCycles + (lastBatchSize > 0 ? 1 : 0);
 
-	double *input = malloc(inputSize * sizeof(double));
-	double *output = malloc(outputSize * sizeof(double));
 	double *batchOutputs = malloc(outputSize * batchSize * sizeof(double));
 
 	int lastImprovementCycle = 0;
@@ -1156,16 +1262,12 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 
 			int startIndex = internalCycle * batchSize;
 			for(int i = 0; i < samplesCount; i++) {
-				for(int k = 0; k < inputSize; k++) {
-					input[k] = inputs[inputSize * indexes[startIndex + i] + k];
-				}
 				for(int k = 0; k < outputSize; k++) {
-					output[k] = outputs[outputSize * indexes[startIndex + i] + k];
-					batchOutputs[i * outputSize + k] = output[k];
+					batchOutputs[i * outputSize + k] = outputs[outputSize * indexes[startIndex + i] + k];
 				}
 
-				calculate(nn, input, i);
-				calculateDeltas(nn, output, i);
+				calculate(nn, inputs + inputSize * indexes[startIndex + i], i);
+				calculateDeltas(nn, outputs + outputSize * indexes[startIndex + i], i);
 			}
 
 			updateWeights(nn, samplesCount);
@@ -1194,8 +1296,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 						printf("\nExit because of no improvements for too long.\n");
 						free(indexes);
 						free(batchOutputs);
-						free(input);
-						free(output);
 						return;
 					}
 				}
@@ -1204,8 +1304,6 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 	}
 
 	free(batchOutputs);
-	free(input);
-	free(output);
 	free(indexes);
 }
 
