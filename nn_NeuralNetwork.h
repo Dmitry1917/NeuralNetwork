@@ -39,16 +39,16 @@ struct NeuralNetwork {
 	int hiddenLayersCount;
 	int neuronsPerHiddenLayer;
 	enum CostFunctionType cft;
-	int trainBlockSize;// Batch size during training. Must be known during network creation to allocate enough memory for training data.
-	double baseTrainCoeff;// Initial multiplicator of gradient during training (learning rate). Can be reduced if no improvement for too long - depends on settings below.
+	int batchSize;// Batch size during training. Must be known during network creation to allocate enough memory for training data.
+	double baseLearningRate;// Initial multiplicator of gradient during training (learning rate). Can be reduced if no improvement for too long - depends on settings below.
 
 	// Must be set manually after network creation, if you want to use these optimizations.
 	double l1RegularizationParameter;
 	double l2RegularizationParameter;
 	double decoupledWeightDecay;// In reality weight decay and l2 regularization are actually different, that was explained clearly in https://arxiv.org/abs/1711.05101 and used for example in PyTorch for AdamW optimization leading to internal flag decoupled_weight_decay. Here both can be used at the same time, but not recommended, unless you are really sure, that improvements can be achieved.
 	int noImprovementsEpochsLimit;// If no improvement on test data during more than this amount of cycles - reduce learning rate by half.
-	double trainCoeffCurrentDecreaser;// Multiplier for baseTrainCoeff, that is what actually decreased then necessary.
-	double trainCoeffDecreaserLimit;// Minimum for value above.
+	double learningRateCurrentDecreaser;// Multiplier for baseTrainCoeff, that is what actually decreased then necessary.
+	double learningRateDecreaserLimit;// Minimum for value above.
 
 	// Values for Adam optimizer. beta1 can also be used separately as weights momentum.
 	double beta1;// Weights momentum. Decay of gradients moving average.
@@ -73,7 +73,7 @@ struct NeuralNetwork {
 };
 
 // Network creation function. Most arguments explained in struct above. aftHidden - activation function type for hidden layers, aftOutput - for output one. loadedWeights and loadedBiases are used in loadNetwork function below, to set saved net info - only use if you REALLY know, what you are doing.
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double beta1, double beta2, double eps, double *loadedWeights, double *loadedBiases);
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int batchSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double beta1, double beta2, double eps, double *loadedWeights, double *loadedBiases);
 
 // Free memory, used for network.
 void destroyNetwork(struct NeuralNetwork **nn);
@@ -83,7 +83,7 @@ void clearOptimizationsBuffers(struct NeuralNetwork nn);
 
 void saveNetwork(struct NeuralNetwork nn, char *fileName);
 // Load network from file, created by previous function. Last parameters are for training only and thefore are not saved.
-struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double beta1, double beta2, double eps);
+struct NeuralNetwork *loadNetwork(char *fileName, int batchSize, double baseTrainCoeff, double beta1, double beta2, double eps);
 
 void calculate(struct NeuralNetwork nn, double *inputs, int resIndex);// Feedforward network. resIndex - index in the current batch, used to choose saving area in memory for results.
 

@@ -31,14 +31,14 @@ class cNeuralNetwork(ctypes.Structure):
             ('hiddenLayersCount', ctypes.c_int),
             ('neuronsPerHiddenLayer', ctypes.c_int),
             ('cft', ctypes.c_int),
-            ('trainBlockSize', ctypes.c_int),
-            ('baseTrainCoeff', ctypes.c_double),
+            ('batchSize', ctypes.c_int),
+            ('baseLearningRate', ctypes.c_double),
             ('l1RegularizationParameter', ctypes.c_double),
             ('l2RegularizationParameter', ctypes.c_double),
             ('decoupledWeightDecay', ctypes.c_double),
             ('noImprovementsEpochsLimit', ctypes.c_int),
-            ('trainCoeffCurrentDecreaser', ctypes.c_double),
-            ('trainCoeffDecreaserLimit', ctypes.c_double),
+            ('learningRateCurrentDecreaser', ctypes.c_double),
+            ('learningRateDecreaserLimit', ctypes.c_double),
             ('beta1', ctypes.c_double),
             ('beta2', ctypes.c_double),
             ('eps', ctypes.c_double),
@@ -107,8 +107,8 @@ def evalMNIST():
     return evalResults
 
 # Simple XOR example.
-#trainBlockSize = 4
-#net = netLib.createNetwork(2, 1, 1, 2, trainBlockSize, cActivationFunctionType.sigmoid, cActivationFunctionType.sigmoid, cCostFunctionType.crossEntropy, ctypes.c_double(0.5), ctypes.c_double(0.0), ctypes.c_double(0.0), ctypes.c_double(0.0), None, None)
+#batchSize = 4
+#net = netLib.createNetwork(2, 1, 1, 2, batchSize, cActivationFunctionType.sigmoid, cActivationFunctionType.sigmoid, cCostFunctionType.crossEntropy, ctypes.c_double(0.5), ctypes.c_double(0.0), ctypes.c_double(0.0), ctypes.c_double(0.0), None, None)
 #
 ##print(net)
 ##print(net.contents.net[2].weightsCount)
@@ -178,7 +178,7 @@ globalValNetworkTestExamplesQuantity = numberOfTestSamples
 
 testAmount = 10
 
-def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, fileName, l1RP=0, l2RP=0, nIEL=0, tCDL=0, beta1=0, beta2=0, eps=0, useAdamBiasCorrection=False, threading=True):
+def testMNIST(hiddenLayers, neuronsPerHiddenLayer, batchSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, fileName, l1RP=0, l2RP=0, nIEL=0, lRDL=0, beta1=0, beta2=0, eps=0, useAdamBiasCorrection=False, threading=True):
     # Prepare reusable image to draw results into.
     plt.figure(figsize=(10, 5 * testAmount), num=1, clear=True)
 
@@ -186,12 +186,12 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
         global evaluationCorrectResults
         evaluationCorrectResults = []
 
-        net = netLib.createNetwork(784, 10, hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, ctypes.c_double(startingLearningRate), ctypes.c_double(beta1), ctypes.c_double(beta2), ctypes.c_double(eps), None, None)
+        net = netLib.createNetwork(784, 10, hiddenLayers, neuronsPerHiddenLayer, batchSize, aftHidden, aftOutput, cft, ctypes.c_double(startingLearningRate), ctypes.c_double(beta1), ctypes.c_double(beta2), ctypes.c_double(eps), None, None)
 
         net.contents.l1RegularizationParameter = l1RP
         net.contents.l2RegularizationParameter = l2RP
         net.contents.noImprovementsEpochsLimit = nIEL
-        net.contents.trainCoeffDecreaserLimit = tCDL
+        net.contents.learningRateDecreaserLimit = lRDL
         net.contents.biasCorrectionInAdamOptimizer = ctypes.c_bool(useAdamBiasCorrection)
 
         global globalValNetworkForEvaluationTest
@@ -199,7 +199,7 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
     
         if threading:
             netLib.startThreading()
-        netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
+        netLib.trainByMiniBatchStochasticGradientDescent(net.contents, trainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, batchSize, evalFuncPointer)
         if threading:
             netLib.stopThreading()
         
@@ -225,18 +225,18 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycle
                          xytext=(0, 5),
                          ha='center')
 
-    plt.suptitle(f'hiddenLayers={hiddenLayers}, neuronsPerHiddenLayer={neuronsPerHiddenLayer},\ntrainBlockSize={trainBlockSize}, maxTrainCycles={maxTrainCycles},\naftHidden={aftHidden}, aftOutput={aftOutput}, cft={cft}, startingLearningRate={startingLearningRate}, l1RP={l1RP},\nl2RP={l2RP}, nIEL={nIEL}, tCDL={tCDL}, beta1={beta1}, beta2={beta2}, eps={eps}, useAdamBiasCorrection={useAdamBiasCorrection}, treading={threading}')
+    plt.suptitle(f'hiddenLayers={hiddenLayers}, neuronsPerHiddenLayer={neuronsPerHiddenLayer},\nbatchSize={batchSize}, maxTrainCycles={maxTrainCycles},\naftHidden={aftHidden}, aftOutput={aftOutput}, cft={cft}, startingLearningRate={startingLearningRate}, l1RP={l1RP},\nl2RP={l2RP}, nIEL={nIEL}, lRDL={lRDL}, beta1={beta1}, beta2={beta2}, eps={eps}, useAdamBiasCorrection={useAdamBiasCorrection}, treading={threading}')
     plt.savefig(fileName, dpi=300)
 
-def testMNISTwithAutoencoder(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, fileName, l1RP=0, l2RP=0, nIEL=0, tCDL=0, beta1=0, beta2=0, eps=0, useAdamBiasCorrection=False, threading=True):
+def testMNISTwithAutoencoder(hiddenLayers, neuronsPerHiddenLayer, batchSize, maxTrainCycles, aftHidden, aftOutput, cft, startingLearningRate, fileName, l1RP=0, l2RP=0, nIEL=0, lRDL=0, beta1=0, beta2=0, eps=0, useAdamBiasCorrection=False, threading=True):
     # Prepare reusable image to draw results into.
     autoencoderMaxTrainCycles = 10
     autoencoderLearningRate = 0.01
-    netAutoencoder = netLib.createNetwork(784, 784, 1, 50, trainBlockSize, cActivationFunctionType.ReLU, cActivationFunctionType.linear, cCostFunctionType.square, ctypes.c_double(autoencoderLearningRate), ctypes.c_double(0.0), ctypes.c_double(0.0), ctypes.c_double(0.0), None, None)
+    netAutoencoder = netLib.createNetwork(784, 784, 1, 50, batchSize, cActivationFunctionType.ReLU, cActivationFunctionType.linear, cCostFunctionType.square, ctypes.c_double(autoencoderLearningRate), ctypes.c_double(0.0), ctypes.c_double(0.0), ctypes.c_double(0.0), None, None)
 
     netAutoencoder.contents.l1RegularizationParameter = 0.0005
 
-    netLib.trainByMiniBatchStochasticGradientDescent(netAutoencoder.contents, trainInputs, trainInputs, numberOfTrainSamples, 784, 784, autoencoderMaxTrainCycles, trainBlockSize, None)
+    netLib.trainByMiniBatchStochasticGradientDescent(netAutoencoder.contents, trainInputs, trainInputs, numberOfTrainSamples, 784, 784, autoencoderMaxTrainCycles, batchSize, None)
 
     originalTrainInputsAddress = ctypes.addressof(trainInputs)
     originalTestInputsAddress = ctypes.addressof(testInputs)
@@ -291,12 +291,12 @@ def testMNISTwithAutoencoder(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize
     global globalValNetworkTestInputs
     globalValNetworkTestInputs = preprocessedTestInputs
 
-    net = netLib.createNetwork(784, 10, hiddenLayers, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, ctypes.c_double(startingLearningRate), ctypes.c_double(beta1), ctypes.c_double(beta2), ctypes.c_double(eps), None, None)
+    net = netLib.createNetwork(784, 10, hiddenLayers, neuronsPerHiddenLayer, batchSize, aftHidden, aftOutput, cft, ctypes.c_double(startingLearningRate), ctypes.c_double(beta1), ctypes.c_double(beta2), ctypes.c_double(eps), None, None)
 
     net.contents.l1RegularizationParameter = l1RP
     net.contents.l2RegularizationParameter = l2RP
     net.contents.noImprovementsEpochsLimit = nIEL
-    net.contents.trainCoeffDecreaserLimit = tCDL
+    net.contents.learningRateDecreaserLimit = lRDL
     net.contents.biasCorrectionInAdamOptimizer = ctypes.c_bool(useAdamBiasCorrection)
 
     global globalValNetworkForEvaluationTest
@@ -304,50 +304,166 @@ def testMNISTwithAutoencoder(hiddenLayers, neuronsPerHiddenLayer, trainBlockSize
     
     if threading:
         netLib.startThreading()
-    netLib.trainByMiniBatchStochasticGradientDescent(net.contents, preprocessedTrainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, trainBlockSize, evalFuncPointer)
+    netLib.trainByMiniBatchStochasticGradientDescent(net.contents, preprocessedTrainInputs, trainResults, numberOfTrainSamples, 784, 10, maxTrainCycles, batchSize, evalFuncPointer)
     if threading:
         netLib.stopThreading()
     
     netLib.destroyNetwork(ctypes.byref(net))
 
-#testMNIST(
-#        hiddenLayers = 1,
-#        neuronsPerHiddenLayer = 30,
-#        trainBlockSize = 10,
-#        maxTrainCycles = 30,
-#        aftHidden = cActivationFunctionType.sigmoid,
-#        aftOutput = cActivationFunctionType.sigmoid,
-#        cft = cCostFunctionType.square,
-#        startingLearningRate = 0.5,
-#        fileName = 'MNIST_sigmoid_square_simplest',
-#        l1RP = 0,
-#        l2RP = 0,
-#        nIEL = 0,
-#        tCDL = 0,
-#        beta1 = 0,
-#        beta2 = 0,
-#        eps = 0,
-#        useAdamBiasCorrection = False,
-#        threading = True)
-
 testMNIST(
         hiddenLayers = 1,
         neuronsPerHiddenLayer = 30,
-        trainBlockSize = 10,
+        batchSize = 10,
         maxTrainCycles = 30,
         aftHidden = cActivationFunctionType.sigmoid,
         aftOutput = cActivationFunctionType.sigmoid,
         cft = cCostFunctionType.square,
-        startingLearningRate = 0.001,
-        fileName = 'MNIST_sigmoid_square_Adam',
+        startingLearningRate = 0.5,
+        fileName = 'MNIST_sigmoid_square_simplest',
         l1RP = 0,
         l2RP = 0,
         nIEL = 0,
-        tCDL = 0,
-        beta1 = 0.9,
-        beta2 = 0.999,
-        eps = 0.00000001,
-        useAdamBiasCorrection = True,
-        threading = True)
+        lRDL = 0,
+        beta1 = 0,
+        beta2 = 0,
+        eps = 0,
+        useAdamBiasCorrection = False,
+        threading = True
+)
+
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.square,
+#        startingLearningRate = 0.15,
+#        fileName = 'MNIST_sigmoid_square_simplest_015'
+#)
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.square,
+#        startingLearningRate = 0.15,
+#        fileName = 'MNIST_sigmoid_square_015_nIEL5',
+#        nIEL = 5,
+#        lRDL = 0.0625
+#)
+#
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.crossEntropy,
+#        startingLearningRate = 0.15,
+#        fileName = 'MNIST_sigmoid_crossEntropy_simplest_015'
+#)
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.crossEntropy,
+#        startingLearningRate = 0.15,
+#        fileName = 'MNIST_sigmoid_crossEntropy_015_nIEL5',
+#        nIEL = 5,
+#        lRDL = 0.0625
+#)
+#
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.softmax,
+#        cft = cCostFunctionType.logLikehood,
+#        startingLearningRate = 0.15,
+#        fileName = 'MNIST_softmax_logLikehood_simplest_015'
+#)
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.softmax,
+#        cft = cCostFunctionType.logLikehood,
+#        startingLearningRate = 0.15,
+#        fileName = 'MNIST_softmax_logLikehood_015_nIEL5',
+#        nIEL = 5,
+#        lRDL = 0.0625
+#)
+
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.square,
+#        startingLearningRate = 0.001,
+#        fileName = 'MNIST_sigmoid_square_Adam',
+#        l1RP = 0,
+#        l2RP = 0,
+#        nIEL = 0,
+#        lRDL = 0,
+#        beta1 = 0.9,
+#        beta2 = 0.999,
+#        eps = 0.00000001,
+#        useAdamBiasCorrection = True,
+#        threading = True)
+
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.sigmoid,
+#        cft = cCostFunctionType.crossEntropy,
+#        startingLearningRate = 0.001,
+#        fileName = 'MNIST_sigmoid_crossEntropy_Adam',
+#        l1RP = 0,
+#        l2RP = 0,
+#        nIEL = 0,
+#        lRDL = 0,
+#        beta1 = 0.9,
+#        beta2 = 0.999,
+#        eps = 0.00000001,
+#        useAdamBiasCorrection = True,
+#        threading = True)
+#
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxTrainCycles = 30,
+#        aftHidden = cActivationFunctionType.sigmoid,
+#        aftOutput = cActivationFunctionType.softmax,
+#        cft = cCostFunctionType.logLikehood,
+#        startingLearningRate = 0.001,
+#        fileName = 'MNIST_sigmoid_logLikehood_Adam',
+#        l1RP = 0,
+#        l2RP = 0,
+#        nIEL = 0,
+#        lRDL = 0,
+#        beta1 = 0.9,
+#        beta2 = 0.999,
+#        eps = 0.00000001,
+#        useAdamBiasCorrection = True,
+#        threading = True)
 
 

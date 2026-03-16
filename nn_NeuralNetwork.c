@@ -155,7 +155,7 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 }
 
 // Used for creating new network or loading saved one, by additionally providing weights and biases.
-struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int trainBlockSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseTrainCoeff, double beta1, double beta2, double eps, double *loadedWeights, double *loadedBiases) {
+struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerNeuronsCount, int hiddenLayersCount, int neuronsPerHiddenLayer, int batchSize, enum ActivationFunctionType aftHidden, enum ActivationFunctionType aftOutput, enum CostFunctionType cft, double baseLearningRate, double beta1, double beta2, double eps, double *loadedWeights, double *loadedBiases) {
 	// Softmax can be only in the last layer.
 	if(aftHidden == softmax) {
 		printf("\nSoftmax can be only in the last layer.\n");
@@ -170,20 +170,20 @@ struct NeuralNetwork *createNetwork(int inputLayerNeuronsCount, int outputLayerN
 	nn->outputLayerNeuronsCount = outputLayerNeuronsCount;
 	nn->hiddenLayersCount = hiddenLayersCount;
 	nn->neuronsPerHiddenLayer = neuronsPerHiddenLayer;
-	nn->trainBlockSize = trainBlockSize;
+	nn->batchSize = batchSize;
 	nn->lastLayerFirstIndex = neuronsCount - outputLayerNeuronsCount;
 	nn->cft = cft;
-	nn->baseTrainCoeff = baseTrainCoeff;
+	nn->baseLearningRate = baseLearningRate;
 	nn->l1RegularizationParameter = 0;
 	nn->l2RegularizationParameter = 0;
 	nn->decoupledWeightDecay = 0;
 	nn->noImprovementsEpochsLimit = 0;
-	nn->trainCoeffCurrentDecreaser = 1;
-	nn->trainCoeffDecreaserLimit = 1;
+	nn->learningRateCurrentDecreaser = 1;
+	nn->learningRateDecreaserLimit = 1;
 
 	nn->net = calloc(neuronsCount, sizeof(struct Neuron));
-	nn->resData = calloc(trainBlockSize * neuronsCount, sizeof(double));
-	nn->deltasData = calloc(trainBlockSize * neuronsCount, sizeof(double));
+	nn->resData = calloc(batchSize * neuronsCount, sizeof(double));
+	nn->deltasData = calloc(batchSize * neuronsCount, sizeof(double));
 	// First hidden layer has number of weights equal to input layer neurons number, multiplied to number of neurons in layer itself, the same logic applied to other hidden layers and output layer.
 	int weightsNumber;
 	if(hiddenLayersCount > 0) {
@@ -388,7 +388,7 @@ void saveNetwork(struct NeuralNetwork nn, char *fileName) {
 	fclose(file);
 }
 
-struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double baseTrainCoeff, double beta1, double beta2, double eps) {
+struct NeuralNetwork *loadNetwork(char *fileName, int batchSize, double baseLearningRate, double beta1, double beta2, double eps) {
 	FILE *file = fopen(fileName, "r");
 	if(file == NULL) {
 		printf("Could not open file %s for read.\n", fileName);
@@ -482,7 +482,7 @@ struct NeuralNetwork *loadNetwork(char *fileName, int trainBlockSize, double bas
 	}
 	fclose(file);
 
-	struct NeuralNetwork *nn = createNetwork(inputLayerNeuronsCount, outputLayerNeuronsCount, hiddenLayersCount, neuronsPerHiddenLayer, trainBlockSize, aftHidden, aftOutput, cft, baseTrainCoeff, beta1, beta2, eps, weights, biases);
+	struct NeuralNetwork *nn = createNetwork(inputLayerNeuronsCount, outputLayerNeuronsCount, hiddenLayersCount, neuronsPerHiddenLayer, batchSize, aftHidden, aftOutput, cft, baseLearningRate, beta1, beta2, eps, weights, biases);
 	return nn;
 }
 
@@ -781,7 +781,7 @@ void printNetworkInExistingFILE(struct NeuralNetwork nn, FILE *file) {
 		struct Neuron n = nn.net[i];
 		if(n.layer == 0) {
 			fprintf(file, "\nneuron ");
-			for(int r = 0; r < nn.trainBlockSize; r++) {
+			for(int r = 0; r < nn.batchSize; r++) {
 				fprintf(file, "res%d: %.4f ", r, nn.resData[nn.neuronsCount * r + i]);
 			}
 		} else {
@@ -797,7 +797,7 @@ void printNetworkInExistingFILE(struct NeuralNetwork nn, FILE *file) {
 			}
 			fprintf(file, "bias: %.4f ", nn.biases[i - nn.inputLayerNeuronsCount]);
 			//printf("%d %d %d", i, xCoord, n.weightsCount);
-			for(int r = 0; r < nn.trainBlockSize; r++) {
+			for(int r = 0; r < nn.batchSize; r++) {
 				fprintf(file, "res%d: %.4f delta%d: %.3f ", r, nn.resData[nn.neuronsCount * r + i], r, nn.deltasData[nn.neuronsCount * r + i]);
 			}
 		}
@@ -934,7 +934,7 @@ double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int batchSi
 
 	if(logsOutput != NULL) {
 		/*fprintf(logsOutput, "\ninputs:");
-		for(int block = 0; block < trainBlockSize; block++) {
+		for(int block = 0; block < batchSize; block++) {
 			fprintf(logsOutput, "\n    inputs%d:", block);
 			for(int i = 0; i < nn.inputLayerNeuronsCount; i++) {
 				fprintf(logsOutput, " %f", nn.net[i].results[block]);
@@ -1034,12 +1034,12 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 }
 
 // Whoever read this - sorry for quite messy code below - original readable version was sacrificed for performance. I was surprised by how much improvements can be achieved even just by moving variables initializations layers above, if possible.
-void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
-	/*if(trainBlockSize < 1) {
+void updateWeights(struct NeuralNetwork nn, int batchSize) {
+	/*if(batchSize < 1) {
 		fprintf(stderr, "\ntrain size < 1\n");
 	}*/
-	double trainCoeff = nn.baseTrainCoeff * nn.trainCoeffCurrentDecreaser;
-	double trainBlockCoeff = 1.0 / trainBlockSize;
+	double learningRate = nn.baseLearningRate * nn.learningRateCurrentDecreaser;
+	double batchSizeCoeff = 1.0 / batchSize;
 
 	nn.iterationsOfWeightsUpdatesDone[0]++;// It must start from 1 to avoid division by zero.
 	double adamOptimizerBeta1BiasCorrection = 1.0;
@@ -1070,16 +1070,16 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 
 			for(int k = 0; k < previousLayerNeuronsCount; k++) {
 				double sumOfWeightDeltas = 0;
-				for(int block = 0; block < trainBlockSize; block++) {
-					int trainBlockShift = nn.neuronsCount * block;
-					sumOfWeightDeltas += (*(resultsOfPreviousLayer + trainBlockShift)) * nn.deltasData[trainBlockShift + neuronTotalIndex];// This multiplication is gradient of weight.
+				for(int block = 0; block < batchSize; block++) {
+					int batchShift = nn.neuronsCount * block;
+					sumOfWeightDeltas += (*(resultsOfPreviousLayer + batchShift)) * nn.deltasData[batchShift + neuronTotalIndex];// This multiplication is gradient of weight.
 				}
 				double l1RegularizationValue = 0;
 				if(nn.l1RegularizationParameter > 0) {
 					// L1 regularization should not push weight over zero, only to it - thefore, if weight is already too small - its module will be used instead of parameter.
 					l1RegularizationValue = fmin(nn.l1RegularizationParameter, fabs(weight[k])) * sign(weight[k]);
 				}
-				double weightGradient = sumOfWeightDeltas * trainBlockCoeff + nn.l2RegularizationParameter * weight[k] + l1RegularizationValue;
+				double weightGradient = sumOfWeightDeltas * batchSizeCoeff + nn.l2RegularizationParameter * weight[k] + l1RegularizationValue;
 				double weightGradientMovingAverage = weightGradient;
 				if(nn.beta1 > 0) {
 					weightGradientMovingAverage = nn.beta1 * weightsGradientsMovingAverages[k] + (1 - nn.beta1) * weightGradient;
@@ -1095,18 +1095,18 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 						wgmaCorrected *= adamOptimizerBeta1BiasCorrection;
 						wgsmaCorrected *= adamOptimizerBeta2BiasCorrection;
 					}
-					weight[k] -= trainCoeff * (wgmaCorrected / (sqrt(wgsmaCorrected) + nn.eps) + nn.decoupledWeightDecay * weight[k]);
+					weight[k] -= learningRate * (wgmaCorrected / (sqrt(wgsmaCorrected) + nn.eps) + nn.decoupledWeightDecay * weight[k]);
 				}
 				else {// Weights momentum only or even without it.
-					weight[k] -= trainCoeff * (weightGradientMovingAverage + nn.decoupledWeightDecay * weight[k]);
+					weight[k] -= learningRate * (weightGradientMovingAverage + nn.decoupledWeightDecay * weight[k]);
 				}
 				resultsOfPreviousLayer++;
 			}
-			for(int block = 0; block < trainBlockSize; block++) {
-				int trainBlockShift = nn.neuronsCount * block;
-				sumOfDeltas += nn.deltasData[trainBlockShift + neuronTotalIndex];
+			for(int block = 0; block < batchSize; block++) {
+				int batchShift = nn.neuronsCount * block;
+				sumOfDeltas += nn.deltasData[batchShift + neuronTotalIndex];
 			}
-			double biasGradient = sumOfDeltas * trainBlockCoeff;
+			double biasGradient = sumOfDeltas * batchSizeCoeff;
 			double biasGradientMovingAverage = biasGradient;
 			if(nn.beta1 > 0) {
 				biasGradientMovingAverage = nn.beta1 * (*biasesGradientsMovingAverages) + (1 - nn.beta1) * biasGradientMovingAverage;
@@ -1122,10 +1122,10 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 					bgmaCorrected *= adamOptimizerBeta1BiasCorrection;
 					bgsmaCorrected *= adamOptimizerBeta2BiasCorrection;
 				}
-				*biases -= trainCoeff * (bgmaCorrected / (sqrt(bgsmaCorrected) + nn.eps) + nn.decoupledWeightDecay * (*biases));
+				*biases -= learningRate * (bgmaCorrected / (sqrt(bgsmaCorrected) + nn.eps) + nn.decoupledWeightDecay * (*biases));
 			}
 			else {// Weights momentum only or even without it.
-				*biases -= trainCoeff * (biasGradientMovingAverage + nn.decoupledWeightDecay * (*biases));
+				*biases -= learningRate * (biasGradientMovingAverage + nn.decoupledWeightDecay * (*biases));
 			}
 		}
 
@@ -1133,7 +1133,7 @@ void updateWeights(struct NeuralNetwork nn, int trainBlockSize) {
 		previousLayerNeuronsCount = currentLayerNeuronsCount;
 		if(layer == nn.hiddenLayersCount) {
 			currentLayerNeuronsCount = nn.outputLayerNeuronsCount;
-			// Here must be setting of separate trainCoeff for output layer then implemented.
+			// Here must be setting of separate learningRate for output layer if implemented.
 		}
 		previousLayerFirstIndex = nn.inputLayerNeuronsCount + nn.neuronsPerHiddenLayer * (layer - 1);
 	}
@@ -1288,8 +1288,8 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 					lastImprovementCorrectness = correctness;
 					lastImprovementCycle = c;
 				} else if(c - lastImprovementCycle > nn.noImprovementsEpochsLimit) {
-					if(nn.trainCoeffCurrentDecreaser > nn.trainCoeffDecreaserLimit) {
-						nn.trainCoeffCurrentDecreaser *= 0.5;
+					if(nn.learningRateCurrentDecreaser > nn.learningRateDecreaserLimit) {
+						nn.learningRateCurrentDecreaser *= 0.5;
 						lastImprovementCycle = c;
 						printf("\nDecrease learning rate.\n");
 					} else {

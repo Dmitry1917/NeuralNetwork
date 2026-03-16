@@ -6,8 +6,8 @@ void testXOR() {
 	int maxTrainCycles = 3000;
 	double costFuncToStop = 0.015;
 
-	int trainBlockSize = 1;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, 0, 0, NULL, NULL);
+	int batchSize = 1;
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, batchSize, sigmoid, sigmoid, square, 2.5, 0, 0, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -56,7 +56,7 @@ void testXOR() {
 	printNetworkInFile(*nn, "xorNet.txt", false);
 /*
 	saveNetwork(*nn, "net.txt");
-	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 2.5, 0, 0, 0);
+	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", batchSize, 2.5, 0, 0, 0);
 	printf("\nLoaded network\n");
 	calculate(*loadedNet, inputs, 0);
 	printNetwork(*loadedNet);
@@ -70,8 +70,8 @@ void testOR() {
 	int maxTrainCycles = 1000;
 	double costFuncToStop = 0.015;
 
-	int trainBlockSize = 4;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, 0, 0, NULL, NULL);
+	int batchSize = 4;
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, batchSize, sigmoid, sigmoid, square, 2.5, 0, 0, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -124,8 +124,8 @@ void testOR() {
 void testAND() {
 	int maxTrainCycles = 1000;
 
-	int trainBlockSize = 2;
-	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, trainBlockSize, sigmoid, sigmoid, square, 2.5, 0, 0, 0, NULL, NULL);
+	int batchSize = 2;
+	struct NeuralNetwork *nn = createNetwork(2, 1, 1, 2, batchSize, sigmoid, sigmoid, square, 2.5, 0, 0, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	double inputs[] = {1, 1};
@@ -152,7 +152,7 @@ void testAND() {
 				0,
 				0
 	};
-	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, maxTrainCycles, trainBlockSize, NULL);
+	trainByMiniBatchStochasticGradientDescent(*nn, groupInputs, groupOutputs, 4, 2, 1, maxTrainCycles, batchSize, NULL);
 
 	printf("\ntest and:\n");
 
@@ -218,8 +218,8 @@ void testAutoencoderMNIST() {
 
 	printf("\ntest inputs set\n");
 
-	int trainBlockSize = 10;
-	struct NeuralNetwork *nnAutoencoder = createNetwork(784, 784, 1, 100, trainBlockSize, ReLU, linear, square, 0.01, 0.0, 0, 0, NULL, NULL);
+	int batchSize = 10;
+	struct NeuralNetwork *nnAutoencoder = createNetwork(784, 784, 1, 100, batchSize, ReLU, linear, square, 0.01, 0.0, 0, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	int maxTrainCycles = 10;
@@ -230,7 +230,7 @@ void testAutoencoderMNIST() {
 
 	//nnAutoencoder->l1RegularizationParameter = 0.0005;
 
-	trainByMiniBatchStochasticGradientDescent(*nnAutoencoder, inputs, inputs, mnistTrainImages.count, 784, 784, maxTrainCycles, trainBlockSize, NULL);//evalNetworkByTestDataForFunctionParam);
+	trainByMiniBatchStochasticGradientDescent(*nnAutoencoder, inputs, inputs, mnistTrainImages.count, 784, 784, maxTrainCycles, batchSize, NULL);//evalNetworkByTestDataForFunctionParam);
 
 	double *inputsPreprocessed = malloc(mnistTrainImages.count * 784 * sizeof(double));
 	double *inputsTestPreprocessed = malloc(mnistTestImages.count * 784 * sizeof(double));
@@ -257,7 +257,7 @@ void testAutoencoderMNIST() {
 	printf("\nstart final network\n");
 	maxTrainCycles = 10;
 
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0, 0, 0, NULL, NULL);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, batchSize, sigmoid, sigmoid, crossEntropy, 0.5, 0.0, 0, 0, NULL, NULL);
 	globalValNetworkForEvaluationTest = nn;
 	globalValNetworkTestInputs = inputsTestPreprocessed;
 	globalValNetworkTestOutputs = outputsTest;
@@ -265,12 +265,12 @@ void testAutoencoderMNIST() {
 
 	nn->l2RegularizationParameter = 0.0005;
 	nn->noImprovementsEpochsLimit = 5;
-	nn->trainCoeffDecreaserLimit = 0.0625;
-	nn->trainCoeffCurrentDecreaser = 1.0;
-	trainByMiniBatchStochasticGradientDescent(*nn, inputsPreprocessed, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, trainBlockSize, evalNetworkByTestDataForFunctionParam);
+	nn->learningRateDecreaserLimit = 0.0625;
+	nn->learningRateCurrentDecreaser = 1.0;
+	trainByMiniBatchStochasticGradientDescent(*nn, inputsPreprocessed, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, batchSize, evalNetworkByTestDataForFunctionParam);
 /*
 	saveNetwork(*nn, "net.txt");
-	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 0.5, 0, 0, 0);
+	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", batchSize, 0.5, 0, 0, 0);
 	printf("\nLoaded network\n");
 	int correctAmountTestData = testNetworkByEvalData(*loadedNet, inputsTest, outputsTest, mnistTestImages.count);
 	printf("\nCorrect test data: %d\n", correctAmountTestData);
@@ -338,8 +338,8 @@ void testMNIST() {
 
 	printf("\ntest inputs set\n");
 
-	int trainBlockSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, trainBlockSize, sigmoid, sigmoid, crossEntropy, 0.001, 0.9, 0.999, 0.00000001, NULL, NULL);
+	int batchSize = 10;
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, batchSize, sigmoid, sigmoid, crossEntropy, 0.001, 0.9, 0.999, 0.00000001, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	int maxTrainCycles = 30;
@@ -353,10 +353,10 @@ void testMNIST() {
 	//nn->l2RegularizationParameter = 0.0005;
 	//nn->decoupledWeightDecay = 0.0005;
 	//nn->noImprovementsEpochsLimit = 5;
-	//nn->trainCoeffDecreaserLimit = 0.0625;
-	//nn->trainCoeffCurrentDecreaser = 1.0;
+	//nn->learningRateDecreaserLimit = 0.0625;
+	//nn->learningRateCurrentDecreaser = 1.0;
 	nn->biasCorrectionInAdamOptimizer = true;
-	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, trainBlockSize, evalNetworkByTestDataForFunctionParam);
+	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, batchSize, evalNetworkByTestDataForFunctionParam);
 /*
 	printf("%.12f\n", nn->weightsGradientsMovingAverages[1000]);
 	printf("%d\n", nn->iterationsOfWeightsUpdatesDone[0]);
@@ -366,7 +366,7 @@ void testMNIST() {
 */
 /*
 	saveNetwork(*nn, "net.txt");
-	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", trainBlockSize, 0.5, 0, 0, 0);
+	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", batchSize, 0.5, 0, 0, 0);
 	printf("\nLoaded network\n");
 	int correctAmountTestData = testNetworkByEvalData(*loadedNet, inputsTest, outputsTest, mnistTestImages.count);
 	printf("\nCorrect test data: %d\n", correctAmountTestData);
