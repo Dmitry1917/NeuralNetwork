@@ -1,11 +1,11 @@
 ## Neural network.
-This code show examples of simple neural network training and its usage. The training system and calculations are written in C for better performance. There are not serious error handling or multiple checks to prevent wrong usage. Proper memory management was tested by Valgrind.
+This code show examples of simple neural network training and its usage. The training system and calculations are written in C for better performance. There are not serious error handling or multiple checks to prevent wrong usage. Proper memory management was verified by Valgrind.
 
-Network itself is in files **nn_NeuralNetwork.h** **(see for comments, explaining functions)** and nn_NeuralNetwork.c.
+Network itself is in files **nn_NeuralNetwork.h** **(look for comments, explaining functions)** and nn_NeuralNetwork.c.
 
 File **use_of_neural_network.c** contains examples of network usage for XOR, OR, AND calculations, using different methods, and digits recognition (MNIST database). All of network abilities can be seen there either directly working or in commented sections (like saving/loading and training logging).
 
-File **test_net.py** do MNIST recognition by using neural network library from Python. It has several versions of training with different parameters and draw results graphs at the end **(commented at the end of file - all together work quite long)**.
+File **test_net.py** do MNIST recognition by using neural network library from Python. It has several versions of training with different parameters and draw results graphs at the end **(commented at the end of file - all together work quite long)**. Also test results are saved in json and can be used for futher analysis to look up for best network configuration **(function processJson())**.
 
 Both files also contain very primitive example of autoencoder usage.
 

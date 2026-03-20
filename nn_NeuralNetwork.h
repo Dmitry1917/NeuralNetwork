@@ -46,7 +46,7 @@ struct NeuralNetwork {
 	double l1RegularizationParameter;
 	double l2RegularizationParameter;
 	double decoupledWeightDecay;// In reality weight decay and l2 regularization are actually different, that was explained clearly in https://arxiv.org/abs/1711.05101 and used for example in PyTorch for AdamW optimization leading to internal flag decoupled_weight_decay. Here both can be used at the same time, but not recommended, unless you are really sure, that improvements can be achieved.
-	int noImprovementsEpochsLimit;// If no improvement on test data during more than this amount of cycles - reduce learning rate by half.
+	int noImprovementsEpochsLimit;// If no improvement on test data during more than this amount of epochs - reduce learning rate by half.
 	double learningRateCurrentDecreaser;// Multiplier for baseTrainCoeff, that is what actually decreased then necessary.
 	double learningRateDecreaserLimit;// Minimum for value above.
 
@@ -93,11 +93,11 @@ void printNetworkInFile(struct NeuralNetwork nn, char *fileName, bool appending)
 
 double costFunction(struct NeuralNetwork nn, double *desiredOutputs, int batchSize, FILE *logsOutput);// Calculate cost function for last calculated batch results. desiredOutputs - expected results for every batch in order (first all in first batch, then all for second etc). samplesCount - batchSize. logsOutput - file to log results and desirables for this calculation.
 
-void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles);// Just train by one sample at the time, until do all of them in shuffled order, then repeat the cycle using new shuffle.
+void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxEpochs);// Just train by one sample at the time, until do all of them in shuffled order, then repeat the cycle using new shuffle during next epoch.
 
-void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles);// Use all samples in giant batch - for small sample size only.
+void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxEpochs);// Use all samples in giant batch - for small sample size only.
 
-void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, double (*netCorrectness)());// Do SGD in mini batch way - train by using only samples from current batch, then repeat, until all samples processed, then next cycle shuffled again.
+void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxEpochs, int batchSize, double (*netCorrectness)());// Do SGD in mini batch way - train by using only samples from current batch, then repeat, until all samples processed, then next epoch shuffled again.
 
 // Activate threading for network feedforward - very primitive implementation, thefore start and stop only immediately around network usage, to prevent wasting CPU resources.
 void startThreading();

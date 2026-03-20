@@ -59,7 +59,7 @@ double dotProduct(double *array1, double* array2, int count) {
 	double res = 0;
 	int i = 0;
 
-	// Surprisingly good optimization - MNIST 10 cycles train and check time drop from 1:45 to 1:15 from this alone. Increasing hardcode more dont provide benefits.
+	// Surprisingly good optimization - MNIST 10 epochs train and check time drop from 1:45 to 1:15 from this alone. Increasing hardcode more dont provide benefits.
 	for(; i < count - 5; i += 5) {
 		res += array1[i] * array2[i] +
 			array1[i+1] * array2[i+1] +
@@ -1140,8 +1140,8 @@ void updateWeights(struct NeuralNetwork nn, int batchSize) {
 }
 
 // Used in simple gradient descent below.
-void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycles) {
-	for(int i = 0; i < maxCycles; i++) {
+void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxEpochs) {
+	for(int i = 0; i < maxEpochs; i++) {
 		calculate(nn, inputs, 0);
 
 		calculateDeltas(nn, outputs, 0);
@@ -1151,8 +1151,8 @@ void train(struct NeuralNetwork nn, double *inputs, double *outputs, int maxCycl
 }
 
 // Train by one sample at the time, cycling all of them.
-void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
-	// Array of indexes to shuffle examples before each training cycle.
+void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxEpochs) {
+	// Array of indexes to shuffle examples before each training epoch.
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	printf("\nindexes for shuffle created\n");
 	for(int i = 0; i < examplesQuantity; i++) {
@@ -1162,14 +1162,14 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
 
-	for(int c = 0; c < maxCycles; c++) {
-		printf("\ngroup train cycle %d", c);
-		if(logsFile != NULL) fprintf(logsFile, "\ngroup train cycle %d", c);
+	for(int c = 0; c < maxEpochs; c++) {
+		printf("\ngroup train epoch %d", c);
+		if(logsFile != NULL) fprintf(logsFile, "\ngroup train epoch %d", c);
 
-		double cycleCost = 0;
+		double epochCost = 0;
 		shuffle(indexes, examplesQuantity);
 		for(int i = 0; i < examplesQuantity; i++) {
-			//printf("\ngroup train cycle %d example %d", c, i);
+			//printf("\ngroup train epoch %d example %d", c, i);
 
 			for(int k = 0; k < inputSize; k++) {
 				input[k] = inputs[inputSize * indexes[i] + k];
@@ -1186,11 +1186,11 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 			train(nn, input, output, 1);
 
 			double cost = costFunction(nn, output, 1, i % 10000 == 0 ? logsFile : NULL);
-			cycleCost += cost;
+			epochCost += cost;
 		}
-		cycleCost /= examplesQuantity;
-		printf("\ncycleCost %f\n", cycleCost);
-		if(cycleCost < costFunctionToStop) break;
+		epochCost /= examplesQuantity;
+		printf("\nepochCost %f\n", epochCost);
+		if(epochCost < costFunctionToStop) break;
 	}
 	free(input);
 	free(output);
@@ -1199,11 +1199,11 @@ void trainByGradientDescent(struct NeuralNetwork nn, double *inputs, double *out
 }
 
 // Train by all samples at once.
-void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxCycles) {
+void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, double costFunctionToStop, int maxEpochs) {
 	double *input = malloc(inputSize * sizeof(double));
 	double *output = malloc(outputSize * sizeof(double));
-	for(int c = 0; c < maxCycles; c++) {
-		if(logsFile != NULL) fprintf(logsFile, "\ngroup together train cycle %d", c);
+	for(int c = 0; c < maxEpochs; c++) {
+		if(logsFile != NULL) fprintf(logsFile, "\ngroup together train epoch %d", c);
 		for(int i = 0; i < examplesQuantity; i++) {
 			for(int k = 0; k < inputSize; k++) {
 				input[k] = inputs[inputSize * i + k];
@@ -1230,9 +1230,9 @@ void trainByBatchGradientDescent(struct NeuralNetwork nn, double *inputs, double
 	free(output);
 }
 
-// Train by small batch of samples at once, reshuffling after all batches was processed in current cycle.
-void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxCycles, int batchSize, double (*netCorrectness)()) {
-	// Array of indexes to shuffle examples before each training cycle.
+// Train by small batch of samples at once, reshuffling after all batches was processed in current epoch.
+void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *inputs, double *outputs, int examplesQuantity, int inputSize, int outputSize, int maxEpochs, int batchSize, double (*netCorrectness)()) {
+	// Array of indexes to shuffle examples before each training epoch.
 	int* indexes = malloc(examplesQuantity * sizeof(int));
 	for(int i = 0; i < examplesQuantity; i++) {
 		indexes[i] = i;
@@ -1244,15 +1244,15 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 
 	double *batchOutputs = malloc(outputSize * batchSize * sizeof(double));
 
-	int lastImprovementCycle = 0;
+	int lastImprovementEpoch = 0;
 	double lastImprovementCorrectness = 0;
 
-	for(int c = 0; c < maxCycles; c++) {
-		if(logsFile != NULL) fprintf(logsFile, "\ngroup together train cycle %d", c);
+	for(int c = 0; c < maxEpochs; c++) {
+		if(logsFile != NULL) fprintf(logsFile, "\ngroup together train epoch %d", c);
 
 		shuffle(indexes, examplesQuantity);
 
-		double cycleCost = 0;
+		double epochCost = 0;
 
 		for(int internalCycle = 0; internalCycle < totalInternalCycles; internalCycle++) {
 			int samplesCount = batchSize;
@@ -1272,12 +1272,12 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 
 			updateWeights(nn, samplesCount);
 			double batchCost = costFunction(nn, batchOutputs, samplesCount, logsFile);
-			cycleCost += batchCost;
+			epochCost += batchCost;
 		}
 
-		cycleCost /= totalInternalCycles;
-		if(logsFile != NULL) fprintf(logsFile, "\ncycle %d cost function: %f\n", c, cycleCost);
-		printf("\ncycle %d cost function: %f\n", c, cycleCost);
+		epochCost /= totalInternalCycles;
+		if(logsFile != NULL) fprintf(logsFile, "\nepoch %d cost function: %f\n", c, epochCost);
+		printf("\nepoch %d cost function: %f\n", c, epochCost);
 
 		if(netCorrectness != NULL) {
 			double correctness = (*netCorrectness)();
@@ -1286,11 +1286,11 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 			if(nn.noImprovementsEpochsLimit > 0) {
 				if(correctness > lastImprovementCorrectness) {
 					lastImprovementCorrectness = correctness;
-					lastImprovementCycle = c;
-				} else if(c - lastImprovementCycle > nn.noImprovementsEpochsLimit) {
+					lastImprovementEpoch = c;
+				} else if(c - lastImprovementEpoch > nn.noImprovementsEpochsLimit) {
 					if(nn.learningRateCurrentDecreaser > nn.learningRateDecreaserLimit) {
 						nn.learningRateCurrentDecreaser *= 0.5;
-						lastImprovementCycle = c;
+						lastImprovementEpoch = c;
 						printf("\nDecrease learning rate.\n");
 					} else {
 						printf("\nExit because of no improvements for too long.\n");
