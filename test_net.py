@@ -4,6 +4,7 @@ from enum import IntEnum
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
+import os
 
 #ctypes preparations.
 class cActivationFunctionType(IntEnum):
@@ -61,7 +62,7 @@ class cNeuralNetwork(ctypes.Structure):
             ('biasesGradientSquaresMovingAverages', ctypes.POINTER(ctypes.c_double))
     ]
 
-netLib = ctypes.CDLL('/home/dmitry/Documents/programs/C/nn/nn_net.so')
+netLib = ctypes.CDLL(os.getcwd() + '/nn_net.so')
 
 netLib.createNetwork.restype = ctypes.POINTER(cNeuralNetwork)
 netLib.testNetworkByEvalData.restype = ctypes.c_int
@@ -226,11 +227,14 @@ def testMNIST(hiddenLayers, neuronsPerHiddenLayer, batchSize, maxEpochs, aftHidd
     plt.suptitle(f'''hiddenLayers={hiddenLayers}, neuronsPerHiddenLayer={neuronsPerHiddenLayer}, batchSize={batchSize}, maxEpochs={maxEpochs},\naftHidden={aftHidden}, \
 aftOutput={aftOutput}, cft={cft}, startingLearningRate={startingLearningRate}, l1RP={l1RP}, l2RP={l2RP}, dWD={dWD},\nnIEL={nIEL}, lRDL={lRDL}, \
 beta1={beta1}, beta2={beta2}, eps={eps}, useAdamBiasCorrection={useAdamBiasCorrection}, treading={threading}''')
-    plt.savefig(fileName, dpi=300)
+
+    os.makedirs('MNIST_ResultsImages', exist_ok = True)
+
+    filePath = 'MNIST_ResultsImages/' + fileName + '.png'
+    plt.savefig(filePath, dpi=300)
 
 #Primitive experiments with autoencoders.
 def testMNISTwithAutoencoder(hiddenLayers, neuronsPerHiddenLayer, batchSize, maxEpochs, aftHidden, aftOutput, cft, startingLearningRate, fileName, l1RP=0, l2RP=0, dWD=0, nIEL=0, lRDL=0, beta1=0, beta2=0, eps=0, useAdamBiasCorrection=False, threading=True):
-    # Prepare reusable image to draw results into.
     autoencoderMaxEpochs = 10
     autoencoderLearningRate = 0.01
     netAutoencoder = netLib.createNetwork(784, 784, 1, 50, batchSize, cActivationFunctionType.ReLU, cActivationFunctionType.linear, cCostFunctionType.square, ctypes.c_double(autoencoderLearningRate), ctypes.c_double(0.0), ctypes.c_double(0.0), ctypes.c_double(0.0), None, None)
@@ -313,11 +317,13 @@ def testMNISTwithAutoencoder(hiddenLayers, neuronsPerHiddenLayer, batchSize, max
     netLib.destroyNetwork(ctypes.byref(net))
 
 #Process saved tests data, to choose best network configuration.
-def processJson():
+def processJson(condition = lambda x: True, fileName = 'MNIST, results of json processing'):
     with open(testResultsFileName, 'r') as file:
         jsonData = json.load(file)
 
-        for test in jsonData:
+        filtered = list(filter(condition, jsonData))
+
+        for test in filtered:
             maxResults = []
             indexesOfMax = []
             meansOfLast5Epochs = []
@@ -332,11 +338,7 @@ def processJson():
                 stdLast5 = np.std(last5)
                 indexOfMax = np.argmax(result)
                 maxRes = result[indexOfMax]
-                #print(indexOfMax)
-                #print(maxRes)
-                #print(result)
-                #print(last)
-                #print(last5)
+
                 maxResults.append(maxRes)
                 indexesOfMax.append(indexOfMax)
                 meansOfLast5Epochs.append(meanLast5)
@@ -347,7 +349,7 @@ def processJson():
             averageMeanOfLast5Epochs = np.mean(meansOfLast5Epochs)
             averageStdOfLast5Epochs = np.mean(stdsOfLast5Epochs)
             averageMax = np.mean(maxResults)
-            averageIndexOfMax = np.mean(indexesOfMax)
+            averageEpochOfMax = np.mean(indexesOfMax)
             absoluteMax = max(maxResults)
 
             test['absoluteMax'] = absoluteMax
@@ -355,25 +357,27 @@ def processJson():
             test['averageMeanOfLast5Epochs'] = averageMeanOfLast5Epochs
             test['averageStdOfLast5Epochs'] = averageStdOfLast5Epochs
             test['averageMax'] = averageMax
-            test['averageIndexOfMax'] = averageIndexOfMax
+            test['averageEpochOfMax'] = averageEpochOfMax
 
         #Show best results.
-        #print(jsonData)
         absoluteMax = 0
         averageMax = 0
-        averageIndexOfMax = 0
+        averageEpochOfMaxMax = 0
+        averageEpochOfMaxMin = 1000000000
         averageMeanOfLast5Epochs = 0
         averageStdOfLast5Epochs = 100#This one is better minimized.
         averageLastResult = 0
 
         absoluteMaxTest = 0
         averageMaxTest = 0
-        averageIndexOfMaxTest = 0
+        averageEpochOfMaxMaxTest = 0
+        averageEpochOfMaxMinTest = 0
         averageMeanOfLast5EpochsTest = 0
         averageStdOfLast5EpochsTest = 0
         averageLastResultTest = 0
 
         for index, test in enumerate(jsonData):
+            if test not in filtered: continue
             if test['absoluteMax'] > absoluteMax:
                 absoluteMax = test['absoluteMax']
                 absoluteMaxTest = index
@@ -389,21 +393,25 @@ def processJson():
             if test['averageMax'] > averageMax:
                 averageMax = test['averageMax']
                 averageMaxTest = index
-            if test['averageIndexOfMax'] > averageIndexOfMax:
-                averageIndexOfMax = test['averageIndexOfMax']
-                averageIndexOfMaxTest = index
+            if test['averageEpochOfMax'] > averageEpochOfMaxMax:
+                averageEpochOfMaxMax = test['averageEpochOfMax']
+                averageEpochOfMaxMaxTest = index
+            if test['averageEpochOfMax'] < averageEpochOfMaxMin:
+                averageEpochOfMaxMin = test['averageEpochOfMax']
+                averageEpochOfMaxMinTest = index
 
-        parametersToShow = 6
+        parametersToShow = 7
         plt.figure(figsize=(10, 5 * parametersToShow), num=1, clear=True)
         plt.subplots_adjust(hspace = 0.5)
-        drawJSONResults(jsonData[absoluteMaxTest], 'absoluteMax max', absoluteMaxTest, 0, parametersToShow)
-        drawJSONResults(jsonData[averageLastResultTest], 'averageLastResult max', averageLastResultTest, 1, parametersToShow)
-        drawJSONResults(jsonData[averageMeanOfLast5EpochsTest], 'averageMeanOfLast5Epochs max', averageMeanOfLast5EpochsTest, 2, parametersToShow)
-        drawJSONResults(jsonData[averageStdOfLast5EpochsTest], 'averageStdOfLast5Epochs min', averageStdOfLast5EpochsTest, 3, parametersToShow)
-        drawJSONResults(jsonData[averageMaxTest], 'averageMax max', averageMaxTest, 4, parametersToShow)
-        drawJSONResults(jsonData[averageIndexOfMaxTest], 'averageIndexOfMax max', averageIndexOfMaxTest, 5, parametersToShow)
+        drawJSONResults(jsonData[absoluteMaxTest], f'Highest absoluteMax: {absoluteMax}.', absoluteMaxTest, 0, parametersToShow)
+        drawJSONResults(jsonData[averageLastResultTest], f'Highest averageLastResult: {averageLastResult}.', averageLastResultTest, 1, parametersToShow)
+        drawJSONResults(jsonData[averageMeanOfLast5EpochsTest], f'Highest averageMeanOfLast5Epochs {averageMeanOfLast5Epochs}.', averageMeanOfLast5EpochsTest, 2, parametersToShow)
+        drawJSONResults(jsonData[averageStdOfLast5EpochsTest], f'Lowest averageStdOfLast5Epochs {averageStdOfLast5Epochs}.', averageStdOfLast5EpochsTest, 3, parametersToShow)
+        drawJSONResults(jsonData[averageMaxTest], f'Highest averageMax {averageMax}.', averageMaxTest, 4, parametersToShow)
+        drawJSONResults(jsonData[averageEpochOfMaxMaxTest], f'Highest averageEpochOfMax {averageEpochOfMaxMax}.', averageEpochOfMaxMaxTest, 5, parametersToShow)
+        drawJSONResults(jsonData[averageEpochOfMaxMinTest], f'Lowest averageEpochOfMax {averageEpochOfMaxMin}.', averageEpochOfMaxMinTest, 6, parametersToShow)
         plt.suptitle('Average results between tests for specific settings.') 
-        plt.savefig('MNIST, result of json processing', dpi=300)
+        plt.savefig(fileName, dpi=300)
 
 #Draw saved experiment result.
 def drawJSONResults(testJSON, paramName, testIndex, paramIndex, paramsAmount):
@@ -440,8 +448,6 @@ evaluationCorrectResults = []
 #batchSize = 4
 #net = netLib.createNetwork(2, 1, 1, 2, batchSize, cActivationFunctionType.sigmoid, cActivationFunctionType.sigmoid, cCostFunctionType.crossEntropy, ctypes.c_double(0.5), ctypes.c_double(0.0), ctypes.c_double(0.0), ctypes.c_double(0.0), None, None)
 #
-##print(net)
-##print(net.contents.net[2].weightsCount)
 #
 #groupInputs = [1, 1,
 #               1, 0,
@@ -516,8 +522,10 @@ testResultsFileName = 'MNIST_tests.json'
 with open(testResultsFileName, 'r') as file:
     testResultsDictionary = json.load(file)
 
-
+# Process saved results and finding the best network parameters by different metrics.
 #processJson()
+#processJson(condition = lambda test: test['eps'] > 0, fileName = 'MNIST, results of json processing, Adam optimizer')
+#processJson(condition = lambda test: test['cft'] == 0, fileName = 'MNIST, results of json processing, square cost')
 #exit()
 
 #testMNIST(
@@ -593,6 +601,22 @@ with open(testResultsFileName, 'r') as file:
 #        lRDL = 0.0625
 #)
 #
+testMNIST(
+        hiddenLayers = 1,
+        neuronsPerHiddenLayer = 30,
+        batchSize = 10,
+        maxEpochs = 30,
+        aftHidden = cActivationFunctionType.sigmoid,
+        aftOutput = cActivationFunctionType.softmax,
+        cft = cCostFunctionType.logLikehood,
+        startingLearningRate = 1.0,
+        fileName = 'MNIST_softmax_logLikehood_1_nIEL1_l1RP00005_l2RP00001',
+        l1RP = 0.00005,
+        l2RP = 0.00001,
+        nIEL = 1,
+        lRDL = 0.015625
+)
+
 #testMNIST(
 #        hiddenLayers = 1,
 #        neuronsPerHiddenLayer = 30,
@@ -602,21 +626,11 @@ with open(testResultsFileName, 'r') as file:
 #        aftOutput = cActivationFunctionType.softmax,
 #        cft = cCostFunctionType.logLikehood,
 #        startingLearningRate = 0.15,
-#        fileName = 'MNIST_softmax_logLikehood_simplest_015'
-#)
-#testMNIST(
-#        hiddenLayers = 1,
-#        neuronsPerHiddenLayer = 30,
-#        batchSize = 10,
-#        maxEpochs = 30,
-#        aftHidden = cActivationFunctionType.sigmoid,
-#        aftOutput = cActivationFunctionType.softmax,
-#        cft = cCostFunctionType.logLikehood,
-#        startingLearningRate = 0.15,
-#        fileName = 'MNIST_softmax_logLikehood_015_nIEL5_l2RP0001',
+#        fileName = 'MNIST_softmax_logLikehood_015_nIEL5_l2RP0001_beta1_05',
 #        l2RP = 0.0001,
 #        nIEL = 5,
-#        lRDL = 0.0625
+#        lRDL = 0.0625,
+#        beta1 = 0.5
 #)
 
 #testMNIST(
@@ -659,11 +673,31 @@ with open(testResultsFileName, 'r') as file:
 #        aftOutput = cActivationFunctionType.softmax,
 #        cft = cCostFunctionType.logLikehood,
 #        startingLearningRate = 0.001,
-#        fileName = 'MNIST_softmax_logLikehood_Adam',
-#        l2RP = 0.00007,
-#        dWD = 0.006,
+#        fileName = 'MNIST_softmax_logLikehood_Adam_l1RP_00005',
+#        l1RP = 0.00005,
+##        l2RP = 0.00007,
+##        dWD = 0.006,
 #        beta1 = 0.9,
 #        beta2 = 0.999,
 #        eps = 0.00000001,
 #        useAdamBiasCorrection = True)
+
+#testMNIST(
+#        hiddenLayers = 1,
+#        neuronsPerHiddenLayer = 30,
+#        batchSize = 10,
+#        maxEpochs = 30,
+#        aftHidden = cActivationFunctionType.ReLU,
+#        aftOutput = cActivationFunctionType.softmax,
+#        cft = cCostFunctionType.logLikehood,
+#        startingLearningRate = 0.001,
+#        fileName = 'MNIST_ReLU_softmax_logLikehood_Adam_l1RP_00005',
+#        l1RP = 0.00005,
+##        l2RP = 0.00007,
+##        dWD = 0.006,
+#        beta1 = 0.9,
+#        beta2 = 0.999,
+#        eps = 0.00000001,
+#        useAdamBiasCorrection = True)
+
 

@@ -53,7 +53,7 @@ void testXOR() {
 	calculate(*nn, inputs3, 0);
 	printNetwork(*nn);
 	costFunction(*nn, outputs3, 1, stdout);
-	printNetworkInFile(*nn, "xorNet.txt", false);
+	//printNetworkInFile(*nn, "xorNet.txt", false);
 /*
 	saveNetwork(*nn, "net.txt");
 	struct NeuralNetwork *loadedNet = loadNetwork("net.txt", batchSize, 2.5, 0, 0, 0);

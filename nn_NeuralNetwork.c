@@ -1288,15 +1288,16 @@ void trainByMiniBatchStochasticGradientDescent(struct NeuralNetwork nn, double *
 					lastImprovementCorrectness = correctness;
 					lastImprovementEpoch = c;
 				} else if(c - lastImprovementEpoch > nn.noImprovementsEpochsLimit) {
+					lastImprovementEpoch = c;
 					if(nn.learningRateCurrentDecreaser > nn.learningRateDecreaserLimit) {
 						nn.learningRateCurrentDecreaser *= 0.5;
-						lastImprovementEpoch = c;
 						printf("\nDecrease learning rate.\n");
 					} else {
-						printf("\nExit because of no improvements for too long.\n");
-						free(indexes);
-						free(batchOutputs);
-						return;
+						//printf("\nExit because of no improvements for too long.\n");
+						//free(indexes);
+						//free(batchOutputs);
+						//return;
+						printf("\nNo improvements for too long, learning rate is minimized already.\n");
 					}
 				}
 			}
