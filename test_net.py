@@ -476,9 +476,9 @@ numberOfTestSamples = testImages[0][0]
 
 # Prepare bare data for analysis.
 resolution = trainImages[0][1] * trainImages[0][2]
-normalizedTrainImages = [i/256.0 for i in trainImages[1]]
+normalizedTrainImages = [i/255.0 for i in trainImages[1]]
 trainLabelsVectorized = [x for i in range(numberOfTrainSamples) for x in vectorized(trainLabels[1][i], 10)]
-normalizedTestImages = [i/256.0 for i in testImages[1]]
+normalizedTestImages = [i/255.0 for i in testImages[1]]
 testLabelsVectorized = [x for i in range(numberOfTestSamples) for x in vectorized(testLabels[1][i], 10)]
 
 # Change train and test data to types used in network.

@@ -339,7 +339,7 @@ void testMNIST() {
 	printf("\ntest inputs set\n");
 
 	int batchSize = 10;
-	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, batchSize, sigmoid, sigmoid, crossEntropy, 0.001, 0.9, 0.999, 0.00000001, NULL, NULL);
+	struct NeuralNetwork *nn = createNetwork(784, 10, 1, 30, batchSize, tanhyp, softmax, logLikehood, 0.3, 0, 0, 0, NULL, NULL);
 	printf("\nnetwork created\n");
 
 	int maxTrainCycles = 30;
@@ -349,11 +349,11 @@ void testMNIST() {
 	globalValNetworkTestOutputs = outputsTest;
 	globalValNetworkTestExamplesQuantity = mnistTestImages.count;
 
-	//nn->l1RegularizationParameter = 0.0005;
+	nn->l1RegularizationParameter = 0.00005;
 	//nn->l2RegularizationParameter = 0.0005;
 	//nn->decoupledWeightDecay = 0.0005;
-	//nn->noImprovementsEpochsLimit = 5;
-	//nn->learningRateDecreaserLimit = 0.0625;
+	nn->noImprovementsEpochsLimit = 2;
+	nn->learningRateDecreaserLimit = 0.0625;
 	//nn->learningRateCurrentDecreaser = 1.0;
 	nn->biasCorrectionInAdamOptimizer = true;
 	trainByMiniBatchStochasticGradientDescent(*nn, inputs, outputs, mnistTrainImages.count, 784, 10, maxTrainCycles, batchSize, evalNetworkByTestDataForFunctionParam);
