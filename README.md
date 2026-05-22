@@ -1,5 +1,5 @@
 ## Neural network.
-This code show examples of simple neural network training and its usage. The training system and calculations are written in C for better performance. There are not proper error handling or multiple checks to prevent wrong usage. Correct memory management was verified by Valgrind.
+This code show examples of simple neural network training and its usage. The training system and calculations are written in C for better performance. There are not proper error handling or multiple checks to prevent wrong usage. Correct memory management was verified by Valgrind. Pure python version can be found https://github.com/Dmitry1917/NeuralNetworkPython.
 
 Network itself is in files **nn_NeuralNetwork.h** **(look for comments, explaining functions)** and nn_NeuralNetwork.c.
 
