@@ -56,19 +56,22 @@ void shuffle(int* array, int length) {
 
 // Used to multiply neuron weights on its inputs.
 double dotProduct(double *array1, double* array2, int count) {
-	double res = 0;
+	double res = 0, res1 = 0, res2 = 0, res3 = 0, res4 = 0, res5 = 0;
 	int i = 0;
 
 	// Surprisingly good optimization - MNIST 10 epochs train and check time drop from 1:45 to 1:15 from this alone. Increasing hardcode more dont provide benefits.
-	for(; i < count - 5; i += 5) {
-		res += array1[i] * array2[i] +
-			array1[i+1] * array2[i+1] +
-			array1[i+2] * array2[i+2] +
-			array1[i+3] * array2[i+3] +
-			array1[i+4] * array2[i+4];
+	// Optimized a little more by moving pointers - 1-2 additional seconds.
+	int remainder = count % 5;
+	for(; i < count - remainder; i += 5) {
+		res1 += (*array1++) * (*array2++);
+		res2 += (*array1++) * (*array2++);
+		res3 += (*array1++) * (*array2++);
+		res4 += (*array1++) * (*array2++);
+		res5 += (*array1++) * (*array2++);
 	}
+	res += res1 + res2 + res3 + res4 + res5;
 	for(; i < count; i++) {
-		res += array1[i] * array2[i];
+		res += (*array1++) * (*array2++);
 	}
 
 	return res;
@@ -87,6 +90,9 @@ char* aftToString(enum ActivationFunctionType aft) {
 			return "linear";
 		case softmax:
 			return "softmax";
+		default:
+			printf("\nUnknown activation function type %d\n, returning standart sigmoid as fallback", aft);
+			return "sigmoid";
 	}
 }
 
@@ -108,6 +114,9 @@ char* cftToString(enum CostFunctionType cft) {
 			return "crossEntropy";
 		case logLikehood:
 			return "logLikehood";
+		default:
+			printf("\nUnknown cost function type %d\n, returning standart square as fallback", cft);
+			return "cftError";
 	}
 }
 
@@ -135,6 +144,9 @@ double activation(double propagation, enum ActivationFunctionType aft) {
 		case softmax:
 			printf("\nNot supposed use softmax here.\n");
 			exit(1);
+		default:
+			printf("\nActivation of unknown function.\n");
+			exit(1);
 	}
 }
 
@@ -150,6 +162,9 @@ double derivativeOfLastActivation(double lastRes, enum ActivationFunctionType af
 			return 1;
 		case softmax:
 			printf("\nNot supposed use softmax here.\n");
+			exit(1);
+		default:
+			printf("\nDerivative of unknown function.\n");
 			exit(1);
 	}
 }
@@ -320,7 +335,7 @@ void clearOptimizationsBuffers(struct NeuralNetwork nn) {
 	if(nn.weightsGradientSquaresMovingAverages != NULL) {
 		memset(nn.weightsGradientSquaresMovingAverages, 0, nn.weightsNumber * sizeof(double));
 	}
-	if(nn.biasesGradientSquaresMovingAverages = NULL) {
+	if(nn.biasesGradientSquaresMovingAverages != NULL) {
 		memset(nn.biasesGradientSquaresMovingAverages, 0, nn.biasesNumber * sizeof(double));
 	}
 }
@@ -400,9 +415,9 @@ struct NeuralNetwork *loadNetwork(char *fileName, int batchSize, double baseLear
 	int outputLayerNeuronsCount = 0;
 	int hiddenLayersCount = 0;
 	int neuronsPerHiddenLayer = 0;
-	enum ActivationFunctionType aftHidden;
-	enum ActivationFunctionType aftOutput;
-	enum CostFunctionType cft;
+	enum ActivationFunctionType aftHidden = sigmoid;
+	enum ActivationFunctionType aftOutput = sigmoid;
+	enum CostFunctionType cft = square;
 
 	if(fgets(buf, sizeof(buf), file) != NULL) {
 		char *partOfSplit = strtok(buf, " ");
@@ -498,78 +513,72 @@ struct ProcessActivationData {
 };
 
 sem_t sem1, sem2, sem3;
+sem_t ready1Sem, ready2Sem, ready3Sem;
 pthread_t thread1, thread2, thread3;
-struct ProcessActivationData *pad1, *pad2, *pad3;
+struct ProcessActivationData *pad1 = NULL;
+struct ProcessActivationData *pad2 = NULL;
+struct ProcessActivationData *pad3 = NULL;
 
-void *processActivationQueue1(void *args) {
+void *processActivationQueue1() {
 	int prevType;
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
 
 	while(1) {
-		//usleep(1);// For valgrind - otherwise it takes too long to check.
-		if(pad1) {
-			double *weights = pad1->weights;
-			double *biases = pad1->biases;
-			double *resData = pad1->resData;
-			for(int i = 0; i < pad1->neuronsCount; i++) {
-				double propagation = dotProduct(weights, pad1->prevLayerResults, pad1->weightsNumber);
-				propagation += *biases;
-				weights += pad1->weightsNumber;
-				biases++;
-				*resData = activation(propagation, pad1->aft);
-				resData++;
-			}
-			pad1 = NULL;
-			sem_post(&sem1);
+		sem_wait(&ready1Sem);
+		double *weights = pad1->weights;
+		double *biases = pad1->biases;
+		double *resData = pad1->resData;
+		for(int i = 0; i < pad1->neuronsCount; i++) {
+			double propagation = dotProduct(weights, pad1->prevLayerResults, pad1->weightsNumber);
+			propagation += *biases;
+			weights += pad1->weightsNumber;
+			biases++;
+			*resData = activation(propagation, pad1->aft);
+			resData++;
 		}
+		sem_post(&sem1);
 	}
 }
 
-void *processActivationQueue2(void *args) {
+void *processActivationQueue2() {
 	int prevType;
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
 
 	while(1) {
-		//usleep(1);// For valgrind - otherwise it takes too long to check.
-		if(pad2) {
-			double *weights = pad2->weights;
-			double *biases = pad2->biases;
-			double *resData = pad2->resData;
-			for(int i = 0; i < pad2->neuronsCount; i++) {
-				double propagation = dotProduct(weights, pad2->prevLayerResults, pad2->weightsNumber);
-				propagation += *biases;
-				weights += pad2->weightsNumber;
-				biases++;
-				*resData = activation(propagation, pad2->aft);
-				resData++;
-			}
-			pad2 = NULL;
-			sem_post(&sem2);
+		sem_wait(&ready2Sem);
+		double *weights = pad2->weights;
+		double *biases = pad2->biases;
+		double *resData = pad2->resData;
+		for(int i = 0; i < pad2->neuronsCount; i++) {
+			double propagation = dotProduct(weights, pad2->prevLayerResults, pad2->weightsNumber);
+			propagation += *biases;
+			weights += pad2->weightsNumber;
+			biases++;
+			*resData = activation(propagation, pad2->aft);
+			resData++;
 		}
+		sem_post(&sem2);
 	}
 }
 
-void *processActivationQueue3(void *args) {
+void *processActivationQueue3() {
 	int prevType;
 	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &prevType);
 
 	while(1) {
-		//usleep(1);// For valgrind - otherwise it takes too long to check.
-		if(pad3) {
-			double *weights = pad3->weights;
-			double *biases = pad3->biases;
-			double *resData = pad3->resData;
-			for(int i = 0; i < pad3->neuronsCount; i++) {
-				double propagation = dotProduct(weights, pad3->prevLayerResults, pad3->weightsNumber);
-				propagation += *biases;
-				weights += pad3->weightsNumber;
-				biases++;
-				*resData = activation(propagation, pad3->aft);
-				resData++;
-			}
-			pad3 = NULL;
-			sem_post(&sem3);
+		sem_wait(&ready3Sem);
+		double *weights = pad3->weights;
+		double *biases = pad3->biases;
+		double *resData = pad3->resData;
+		for(int i = 0; i < pad3->neuronsCount; i++) {
+			double propagation = dotProduct(weights, pad3->prevLayerResults, pad3->weightsNumber);
+			propagation += *biases;
+			weights += pad3->weightsNumber;
+			biases++;
+			*resData = activation(propagation, pad3->aft);
+			resData++;
 		}
+		sem_post(&sem3);
 	}
 }
 
@@ -579,9 +588,16 @@ void startThreading() {
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, 1);
 
+	pad1 = calloc(1, sizeof(struct ProcessActivationData));
+	pad2 = calloc(1, sizeof(struct ProcessActivationData));
+	pad3 = calloc(1, sizeof(struct ProcessActivationData));
+
 	sem_init(&sem1, 0, 0);
 	sem_init(&sem2, 0, 0);
 	sem_init(&sem3, 0, 0);
+	sem_init(&ready1Sem, 0, 0);
+	sem_init(&ready2Sem, 0, 0);
+	sem_init(&ready3Sem, 0, 0);
 	pthread_create(&thread1, &attr, processActivationQueue1, NULL);
 	pthread_create(&thread2, &attr, processActivationQueue2, NULL);
 	pthread_create(&thread3, &attr, processActivationQueue3, NULL);
@@ -599,6 +615,13 @@ void stopThreading() {
 	sem_destroy(&sem1);
 	sem_destroy(&sem2);
 	sem_destroy(&sem3);
+	sem_destroy(&ready1Sem);
+	sem_destroy(&ready2Sem);
+	sem_destroy(&ready3Sem);
+
+	free(pad1);
+	free(pad2);
+	free(pad3);
 }
 
 // Feedforward data to network. resIndex parameter show index of sample in mini batch, to save results properly for future use during learning.
@@ -658,9 +681,12 @@ void calculate(struct NeuralNetwork nn, double *inputs, int resIndex) {
 			biases += previousNeurons;
 			resData += previousNeurons;
 		
-			pad1 = &data1;
-			pad2 = &data2;
-			pad3 = &data3;
+			memcpy(pad1, &data1, sizeof(struct ProcessActivationData));
+			memcpy(pad2, &data2, sizeof(struct ProcessActivationData));
+			memcpy(pad3, &data3, sizeof(struct ProcessActivationData));
+			sem_post(&ready1Sem);
+			sem_post(&ready2Sem);
+			sem_post(&ready3Sem);
 		}
 		if(aft == softmax) {
 			double *exponents = malloc(nn.outputLayerNeuronsCount * sizeof(double));
@@ -987,7 +1013,6 @@ void calculateDeltas(struct NeuralNetwork nn, double *results, int resIndex) {
 		case crossEntropy:
 		case logLikehood:
 			for(; i >= nn.lastLayerFirstIndex; i--) {
-				struct Neuron *n = &(nn.net[i]);
 				double lastRes = nn.resData[resIndexShift + i]; 
 		
 				double delta = lastRes - results[i - nn.lastLayerFirstIndex];

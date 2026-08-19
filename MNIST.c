@@ -9,12 +9,17 @@ void freeMNIST(struct MNIST_Data mnist) {
 }
 
 struct MNIST_Data readMNIST(char *fileName) {
+	const char *errorMessage = "\nMNIST data is corrupted.\n";
 	FILE *file = fopen(fileName, "rb");
 	unsigned char mainInfoBuffer[4];
 	int *dimensions = NULL;
 	int samplesCount;
-	unsigned char *data;
-	fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, file);
+	size_t readed = fread(mainInfoBuffer, sizeof(mainInfoBuffer), 1, file);
+	if(readed < 1) {
+		fclose(file);
+		fprintf(stderr, "%s", errorMessage);
+		exit(1);
+	}
 
 	struct MNIST_Data mnist;
 
@@ -25,7 +30,12 @@ struct MNIST_Data readMNIST(char *fileName) {
 		uint32_t *dimensionsBuffer = malloc(dimensionsBufferSize);
 		uint32_t *allDimensions = malloc(dimensionsBufferSize);
 
-		fread(dimensionsBuffer, dimensionsBufferSize, 1, file);
+		readed = fread(dimensionsBuffer, dimensionsBufferSize, 1, file);
+		if(readed < 1) {
+			fclose(file);
+			fprintf(stderr, "%s", errorMessage);
+			exit(1);
+		}
 		for(int i = 0; i < dimensionsAmount; i++) {
 			// Process big/little endians.
 			allDimensions[i] = __builtin_bswap32(dimensionsBuffer[i]);
@@ -46,7 +56,12 @@ struct MNIST_Data readMNIST(char *fileName) {
 
 		int dataSize = sampleSize * samplesCount * sizeof(char);
 		unsigned char *buf = malloc(dataSize);
-		fread(buf, dataSize, 1, file);
+		readed = fread(buf, dataSize, 1, file);
+		if(readed < 1) {
+			fclose(file);
+			fprintf(stderr, "%s", errorMessage);
+			exit(1);
+		}
 
 		mnist.dimensionsAmount = dimensionsAmount < 2 ? 1 : dimensionsAmount - 1;
 		mnist.dimensions = dimensions;
@@ -63,7 +78,7 @@ struct MNIST_Data readMNIST(char *fileName) {
 */
 	} else {
 		fclose(file);
-		fprintf(stderr, "wrong mnist file format");
+		fprintf(stderr, "%s", errorMessage);
 		exit(1);
 	}
 	fclose(file);
